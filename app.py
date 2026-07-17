@@ -96,6 +96,7 @@ def split(project_id: str = Form(...),
     import splitter
     import r2_storage as r2
 
+    import traceback
     ad = ad_id or Path(file.filename or "ad").stem
     work = Path(tempfile.mkdtemp(prefix="split_"))
     try:
@@ -122,6 +123,9 @@ def split(project_id: str = Form(...),
             "r2_prefix": f"projects/{project_id}/{ad}/",
             "shots": shots,
         }
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}",
+                "trace": traceback.format_exc()[-3000:]}
     finally:
         shutil.rmtree(work, ignore_errors=True)
 

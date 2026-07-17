@@ -18,6 +18,27 @@ from typing import List, Tuple
 
 import numpy as np
 
+_ffmpeg_ready = False
+
+
+def _ensure_ffmpeg():
+    """确保 ffmpeg / ffprobe 可用。Railway 运行环境不含 ffmpeg，
+    用 static-ffmpeg 自带的静态二进制，运行时加进 PATH（与构建器无关）。"""
+    global _ffmpeg_ready
+    if _ffmpeg_ready:
+        return
+    import shutil as _sh
+    if _sh.which("ffprobe") and _sh.which("ffmpeg"):
+        _ffmpeg_ready = True
+        return
+    try:
+        import static_ffmpeg
+        static_ffmpeg.add_paths()  # 首次会下载静态 ffmpeg/ffprobe 并加入 PATH
+    except Exception as e:
+        raise RuntimeError(f"ffmpeg/ffprobe 不可用且 static-ffmpeg 加载失败: {e}")
+    _ffmpeg_ready = True
+
+
 _model = None
 _DEVICE = None
 
@@ -97,6 +118,7 @@ def split_video(video_path: str, out_dir: str, precise: bool = True,
     拆分一个视频 → out_dir 下 shot_XXX.mp4 + shots.json。
     返回 shots 列表。
     """
+    _ensure_ffmpeg()
     _ensure_model()
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

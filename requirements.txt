@@ -11,3 +11,4 @@ uvicorn[standard]
 python-multipart
 torch
 git+https://github.com/kunato/transnetv2pt.git
+static-ffmpeg
