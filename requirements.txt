@@ -1,0 +1,9 @@
+boto3
+python-dotenv
+openai
+pydantic
+numpy
+opencv-python-headless
+ffmpeg-python
+fastapi
+uvicorn[standard]

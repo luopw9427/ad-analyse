@@ -1,0 +1,15 @@
+# 密钥与环境变量，切勿提交
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# 本地产物 / 大文件
+*.zip
+*.mp4
+*.mov
+r2_下载/

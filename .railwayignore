@@ -1,0 +1,18 @@
+# 部署只需代码，排除样本素材/产物/大文件
+*.mp4
+*.mov
+*.mkv
+*.zip
+*.png
+r2_下载/
+仿真花素材处理示例/
+batch_4videos_transnetv2*/
+章鱼素材/
+章鱼素材切分/
+前置内容/
+合并流程/__pycache__/
+拆分流程/__pycache__/
+批处理/__pycache__/
+__pycache__/
+.env
+*.ipynb

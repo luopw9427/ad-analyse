@@ -1,0 +1,3 @@
+# Railway 用 Nixpacks 构建，这里额外装 ffmpeg（分析要 ffprobe/ffmpeg 切帧）
+[phases.setup]
+aptPkgs = ["ffmpeg"]
