@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>视频广告分析 · 结果查看</title>
+<style>
+  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--txt:#e6e8ec;--sub:#9aa0ab;--acc:#7f77dd;--ok:#4ecb8d;--warn:#e0995f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
+  header{padding:16px 24px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
+  header h1{font-size:16px;margin:0 12px 0 0}
+  input{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:7px 10px;border-radius:6px;font-size:13px}
+  button{background:var(--acc);border:0;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+  button.ghost{background:transparent;border:1px solid var(--line);color:var(--sub)}
+  main{padding:20px 24px;max-width:1100px;margin:0 auto}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+  .card h2{font-size:15px;margin:0 0 12px}
+  .card h3{font-size:13px;color:var(--sub);margin:14px 0 6px;font-weight:600}
+  .tags{display:flex;flex-wrap:wrap;gap:6px}
+  .tag{background:#22262f;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px}
+  .tag.pain{border-color:var(--warn);color:var(--warn)}
+  .shots{display:flex;flex-wrap:wrap;gap:10px}
+  .shots video{width:180px;border-radius:6px;background:#000;border:1px solid var(--line)}
+  .prompt{position:relative;background:#12141a;border:1px solid var(--line);border-radius:6px;padding:10px 10px 10px;margin:6px 0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;color:#cdd2da}
+  .copy{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px;background:#2a2f3a}
+  .muted{color:var(--sub)}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+  th{color:var(--sub);font-weight:600}
+  .badge{padding:1px 8px;border-radius:10px;font-size:11px}
+  .badge.done{background:rgba(78,203,141,.15);color:var(--ok)}
+  .badge.error{background:rgba(224,153,95,.15);color:var(--warn)}
+  .status{color:var(--sub);margin-left:8px}
+  details{margin-top:8px}
+  summary{cursor:pointer;color:var(--sub)}
+</style>
+</head>
+<body>
+<header>
+  <h1>视频广告分析 · 结果</h1>
+  <input id="project" placeholder="项目 project_id" value="test" size="12">
+  <input id="token" placeholder="X-API-Token" type="password" size="14">
+  <button onclick="loadAll()">加载</button>
+  <button class="ghost" onclick="loadJobs()">刷新任务</button>
+  <span id="status" class="status"></span>
+</header>
+<main>
+  <div class="card" id="jobsCard">
+    <h2>任务记录</h2>
+    <div id="jobs" class="muted">点「加载」后显示</div>
+  </div>
+  <div id="results"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+function tok(){return $('#token').value.trim()}
+function proj(){return $('#project').value.trim()}
+function headers(){return tok()?{'X-API-Token':tok()}:{}}
+function setStatus(t){$('#status').textContent=t||''}
+
+// 记住上次输入
+$('#token').value = localStorage.getItem('tok')||'';
+$('#project').value = localStorage.getItem('proj')||'test';
+
+async function api(path){
+  const r = await fetch(path,{headers:headers()});
+  if(!r.ok) throw new Error(path+' -> '+r.status);
+  return r.json();
+}
+
+function copyBtn(text){
+  const b=document.createElement('button');b.className='copy';b.textContent='复制';
+  b.onclick=()=>{navigator.clipboard.writeText(text);b.textContent='已复制';setTimeout(()=>b.textContent='复制',1200)};
+  return b;
+}
+function promptBlock(text){
+  const d=document.createElement('div');d.className='prompt';d.textContent=text;
+  d.appendChild(copyBtn(text));return d;
+}
+function tags(arr,cls){
+  const w=document.createElement('div');w.className='tags';
+  (arr||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});
+  return w;
+}
+
+async function loadJobs(){
+  try{
+    const d=await api('/jobs?limit=30');
+    if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
+    if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
+    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>状态</th><th>耗时(s)</th><th>时间</th></tr>';
+    d.jobs.forEach(j=>{h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td><span class="badge ${j.ok?'done':'error'}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td></tr>`});
+    $('#jobs').innerHTML=h+'</table>';
+  }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
+}
+
+function adFromKey(k,pid){
+  // projects/{pid}/{ad}/analysis_output/xxx.json  ->  ad
+  const rest=k.replace('projects/'+pid+'/','');
+  const parts=rest.split('/');
+  return parts.length>=2 ? parts[0] : null;
+}
+
+async function loadAll(){
+  localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());
+  setStatus('加载中…');$('#results').innerHTML='';
+  await loadJobs();
+  let data;
+  try{ data=await api('/result?project_id='+encodeURIComponent(proj())); }
+  catch(e){ setStatus('加载失败：'+e.message); return; }
+  setStatus('共 '+data.count+' 个对象');
+
+  const pid=proj();
+  const ads={}; let common=null;
+  // 归组
+  for(const [k,v] of Object.entries(data.reports||{})){
+    if(k.endsWith('/共性镜头prompt.json')||k==='projects/'+pid+'/共性镜头prompt.json'){common=v;continue}
+    const ad=adFromKey(k,pid); if(!ad)continue;
+    ads[ad]=ads[ad]||{};
+    if(k.endsWith('ad_aggregate.json'))ads[ad].agg=v;
+    else if(k.endsWith('video_prompt.json'))ads[ad].vp=v;
+    else if(k.endsWith('shot_prompts.json'))ads[ad].sp=v;
+  }
+  // 每个广告的切片视频
+  const vids={};
+  (data.objects||[]).forEach(o=>{
+    if(o.key.endsWith('.mp4')){const ad=adFromKey(o.key,pid);if(ad){(vids[ad]=vids[ad]||[]).push(o.url)}}
+  });
+
+  const root=$('#results');
+  for(const [ad,d] of Object.entries(ads)){
+    root.appendChild(renderAd(ad,d,vids[ad]||[]));
+  }
+  if(common)root.appendChild(renderCommon(common));
+}
+
+function renderAd(ad,d,videos){
+  const c=document.createElement('div');c.className='card';
+  const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
+  c.innerHTML=`<h2>广告：${ad} <span class="muted" style="font-weight:400">· ${agg.total_duration||'?'}s · ${agg.广告结构分类?'':''}${(vp.广告结构分类&&vp.广告结构分类.主结构)||''}</span></h2>`;
+  if(agg.广告主张){const p=document.createElement('div');p.innerHTML='<b>主张：</b>'+agg.广告主张;c.appendChild(p)}
+  if(videos.length){const h=document.createElement('h3');h.textContent='镜头切片';c.appendChild(h);
+    const w=document.createElement('div');w.className='shots';
+    videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;w.appendChild(v)});c.appendChild(w)}
+  if(agg.商品卖点){const h=document.createElement('h3');h.textContent='卖点';c.appendChild(h);c.appendChild(tags(agg.商品卖点))}
+  if(agg.解决痛点){const h=document.createElement('h3');h.textContent='痛点';c.appendChild(h);c.appendChild(tags(agg.解决痛点,'pain'))}
+  if(vp.video_prompt_text){const h=document.createElement('h3');h.textContent='视频级脚本 prompt';c.appendChild(h);c.appendChild(promptBlock(vp.video_prompt_text))}
+  const list=(sp.镜头级prompt列表||[]);
+  if(list.length){const h=document.createElement('h3');h.textContent='镜头 prompt 素材（'+list.length+' 条）';c.appendChild(h);
+    const det=document.createElement('details');det.innerHTML='<summary>展开查看</summary>';
+    list.forEach(item=>{const t=document.createElement('div');t.style.marginTop='8px';
+      t.innerHTML='<b>'+(item.标题||item.id||'')+'</b> ';
+      det.appendChild(t);det.appendChild(tags(item.卖点));det.appendChild(promptBlock(item.prompt||''))});
+    c.appendChild(det)}
+  return c;
+}
+
+function renderCommon(v){
+  const c=document.createElement('div');c.className='card';
+  c.innerHTML=`<h2>品类共性镜头库 · ${v.品类||''} <span class="muted" style="font-weight:400">（${(v.共性镜头prompt列表||[]).length} 条）</span></h2>`;
+  if(v.商品共性卖点){c.appendChild(tags(v.商品共性卖点))}
+  (v.共性镜头prompt列表||[]).forEach(item=>{
+    const t=document.createElement('div');t.style.marginTop='10px';t.innerHTML='<b>'+(item.标题||item.id||'')+'</b>';
+    c.appendChild(t);c.appendChild(tags(item.卖点));c.appendChild(promptBlock(item.prompt||''))});
+  return c;
+}
+</script>
+</body>
+</html>

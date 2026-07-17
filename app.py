@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import r2_storage as r2
@@ -58,6 +59,12 @@ class AnalyzeReq(BaseModel):
     pro: bool = False
     overwrite: bool = False
     cross_compare: bool = False
+
+
+@app.get("/")
+def home():
+    """结果查看网页（单页）。"""
+    return FileResponse(ROOT / "index.html")
 
 
 @app.get("/health")
