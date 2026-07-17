@@ -51,7 +51,10 @@ def sync_down(project_id: str, dest_root: Path) -> list[str]:
             continue
         local = dest_root / rel
         r2.download_file(k, local)
-        ads.add(rel.split("/")[0])
+        # 只把"含 shot_*.mp4 的文件夹"算作一条广告，忽略根目录下的汇总文件
+        parts = rel.split("/")
+        if len(parts) >= 2 and parts[-1].startswith("shot_") and parts[-1].endswith(".mp4"):
+            ads.add(parts[0])
     print(f"[R2↓] 从 {prefix} 拉下 {len(keys)} 个对象，{len(ads)} 条广告：{', '.join(sorted(ads))}")
     return sorted(ads)
 

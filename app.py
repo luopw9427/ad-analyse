@@ -2,25 +2,21 @@
 视频广告分析 · HTTP 服务（部署到 Railway）
 ==========================================
 
-对外只暴露一个触发接口，内部复用已跑通的 run_from_r2.py 逻辑：
-    从 R2 拉切片 → 调 batch_analyze 分析 → 产物写回 R2。
+复用已跑通的 run_from_r2.py 逻辑：从 R2 拉切片 → 调 batch_analyze 分析 → 产物写回 R2。
 
 接口：
     GET  /health                 健康检查
     POST /analyze                触发一次分析
-      body: {"project_id":"test","product":"章鱼",
-             "pipeline":"merged","pro":false,
-             "overwrite":false,"cross_compare":false}
-      header（可选）: X-API-Token: <APP_TOKEN>
+      body: {"project_id":"test","product":"章鱼","pipeline":"merged",
+             "pro":false,"overwrite":false,"cross_compare":false}
+    GET  /result?project_id=test 查看某项目在 R2 的分析产物
+      可选 ?include_content=false 只列文件不返回内容
+    以上带保护的接口需请求头 X-API-Token（设了 APP_TOKEN 才校验）
 
-环境变量（在 Railway Variables 里配）：
+环境变量（Railway Variables）：
     R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY
     R2_BUCKET_NAME / R2_ENDPOINT / R2_PUBLIC_URL
-    OPENROUTER_API_KEY
-    APP_TOKEN（可选，设了就要求请求带同样的 X-API-Token）
-
-本地起服务：
-    uvicorn app:app --reload --port 8000
+    OPENROUTER_API_KEY / APP_TOKEN（可选）
 """
 
 from __future__ import annotations
@@ -33,11 +29,18 @@ from typing import Optional
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+import r2_storage as r2
+
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 
-app = FastAPI(title="视频广告分析服务", version="0.1")
+app = FastAPI(title="视频广告分析服务", version="0.2")
+
+
+def _check_token(x_api_token: str):
+    if APP_TOKEN and x_api_token != APP_TOKEN:
+        raise HTTPException(status_code=401, detail="invalid X-API-Token")
 
 
 class AnalyzeReq(BaseModel):
@@ -56,8 +59,7 @@ def health():
 
 @app.post("/analyze")
 def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
-    if APP_TOKEN and x_api_token != APP_TOKEN:
-        raise HTTPException(status_code=401, detail="invalid X-API-Token")
+    _check_token(x_api_token)
 
     cmd = [sys.executable, str(RUN_FROM_R2),
            "--project", req.project_id, "--product", req.product]
@@ -77,4 +79,33 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
         "returncode": proc.returncode,
         "r2_prefix": f"projects/{req.project_id}/",
         "log_tail": log[-4000:],
+    }
+
+
+@app.get("/result")
+def result(project_id: str, include_content: bool = True,
+           x_api_token: str = Header(default="")):
+    _check_token(x_api_token)
+
+    prefix = f"projects/{project_id}/"
+    keys = r2.list_keys(prefix)
+    if not keys:
+        raise HTTPException(status_code=404, detail=f"{prefix} 下没有任何产物")
+
+    objects = [{"key": k, "url": r2.public_url(k)} for k in keys]
+
+    reports = {}
+    if include_content:
+        for k in keys:
+            if k.endswith(".json"):
+                try:
+                    reports[k] = r2.read_json(k)
+                except Exception as e:
+                    reports[k] = {"_error": str(e)}
+
+    return {
+        "project_id": project_id,
+        "count": len(keys),
+        "objects": objects,
+        "reports": reports,
     }
