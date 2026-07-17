@@ -244,10 +244,8 @@ def generate_shot_prompts(
     # 硬填入元信息
     result.ad_id = ad_id
     result.产品名 = product_name
-    try:
-        result.source_video_prompt = str(video_prompt_path.relative_to(Path.cwd()))
-    except Exception:
-        result.source_video_prompt = str(video_prompt_path)
+    # 只存文件名，避免把临时/绝对路径泄漏进产物
+    result.source_video_prompt = Path(video_prompt_path).name
 
     if output_path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
