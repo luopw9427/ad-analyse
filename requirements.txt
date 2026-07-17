@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 boto3
 python-dotenv
 openai
@@ -7,3 +8,6 @@ opencv-python-headless
 ffmpeg-python
 fastapi
 uvicorn[standard]
+python-multipart
+torch
+git+https://github.com/kunato/transnetv2pt.git

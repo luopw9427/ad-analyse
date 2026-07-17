@@ -4,6 +4,7 @@
 
 ## 接口
 - `GET /health` 健康检查
+- `POST /split` 上传视频→云端拆分→切片写回 R2（multipart 表单：project_id, ad_id(可选), file）
 - `POST /analyze` 触发一次分析
   ```json
   {"project_id":"test","product":"章鱼","pipeline":"merged","pro":false,"overwrite":false,"cross_compare":false}

@@ -1,3 +1,4 @@
-# Railway 用 Nixpacks 构建，这里额外装 ffmpeg（分析要 ffprobe/ffmpeg 切帧）
+# Railway 用 Nixpacks 构建
+# ffmpeg：拆分/分析切帧切片；git：pip 从 git 安装 transnetv2pt
 [phases.setup]
-aptPkgs = ["ffmpeg"]
+aptPkgs = ["ffmpeg", "git"]

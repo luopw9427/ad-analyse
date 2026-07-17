@@ -23,10 +23,12 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import tempfile
+import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 import r2_storage as r2
@@ -80,6 +82,48 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
         "r2_prefix": f"projects/{req.project_id}/",
         "log_tail": log[-4000:],
     }
+
+
+@app.post("/split")
+def split(project_id: str = Form(...),
+          ad_id: str = Form(default=""),
+          precise: bool = Form(default=True),
+          file: UploadFile = File(...),
+          x_api_token: str = Header(default="")):
+    """上传视频 → 云端拆分 → 切片+shots.json 写回 R2 projects/{project_id}/{ad_id}/。"""
+    _check_token(x_api_token)
+
+    import splitter
+    import r2_storage as r2
+
+    ad = ad_id or Path(file.filename or "ad").stem
+    work = Path(tempfile.mkdtemp(prefix="split_"))
+    try:
+        video_path = work / (file.filename or "input.mp4")
+        with open(video_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+
+        out_dir = work / ad
+        shots = splitter.split_video(str(video_path), str(out_dir), precise=precise)
+
+        # 回传切片 + shots.json 到 R2
+        uploaded = 0
+        for fp in sorted(out_dir.iterdir()):
+            if fp.is_file():
+                r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
+                uploaded += 1
+
+        return {
+            "ok": True,
+            "project_id": project_id,
+            "ad_id": ad,
+            "n_shots": len(shots),
+            "uploaded": uploaded,
+            "r2_prefix": f"projects/{project_id}/{ad}/",
+            "shots": shots,
+        }
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 @app.get("/result")
