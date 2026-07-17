@@ -32,12 +32,18 @@ from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
 import r2_storage as r2
+import db
 
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 
-app = FastAPI(title="视频广告分析服务", version="0.2")
+app = FastAPI(title="视频广告分析服务", version="0.3")
+
+
+@app.on_event("startup")
+def _startup():
+    db.init_db()
 
 
 def _check_token(x_api_token: str):
@@ -74,10 +80,16 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     if req.cross_compare:
         cmd.append("--cross-compare")
 
+    import time as _t
+    _t0 = _t.time()
     proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
     log = (proc.stdout or "") + (proc.stderr or "")
+    ok = proc.returncode == 0
+    db.record("analyze", req.project_id, req.product, ok,
+              f"projects/{req.project_id}/",
+              "" if ok else log[-500:], _t.time() - _t0)
     return {
-        "ok": proc.returncode == 0,
+        "ok": ok,
         "returncode": proc.returncode,
         "r2_prefix": f"projects/{req.project_id}/",
         "log_tail": log[-4000:],
@@ -95,7 +107,6 @@ def split(project_id: str = Form(...),
 
     import splitter
     import r2_storage as r2
-
     import traceback
     ad = ad_id or Path(file.filename or "ad").stem
     work = Path(tempfile.mkdtemp(prefix="split_"))
@@ -114,6 +125,8 @@ def split(project_id: str = Form(...),
                 r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
                 uploaded += 1
 
+        db.record("split", project_id, ad, True,
+                  f"projects/{project_id}/{ad}/", f"{len(shots)} shots", 0.0)
         return {
             "ok": True,
             "project_id": project_id,
@@ -124,6 +137,7 @@ def split(project_id: str = Form(...),
             "shots": shots,
         }
     except Exception as e:
+        db.record("split", project_id, ad, False, "", f"{type(e).__name__}: {e}", 0.0)
         return {"ok": False, "error": f"{type(e).__name__}: {e}",
                 "trace": traceback.format_exc()[-3000:]}
     finally:
@@ -157,3 +171,9 @@ def result(project_id: str, include_content: bool = True,
         "objects": objects,
         "reports": reports,
     }
+
+
+@app.get("/jobs")
+def jobs(limit: int = 50, x_api_token: str = Header(default="")):
+    _check_token(x_api_token)
+    return {"jobs": db.recent(limit), "db_enabled": db.enabled()}
