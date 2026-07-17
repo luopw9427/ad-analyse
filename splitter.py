@@ -51,10 +51,39 @@ def _ensure_model():
     import torch
 
     if not torch.cuda.is_available():
-        # 无 GPU：patch 掉 CUDA 调用，让 transnetv2pt import 时不崩
+        # 无 GPU：全面 patch CUDA 调用（transnetv2pt 的 predict_raw 内部硬编码 .to("cuda")）
+        torch.cuda._lazy_init = lambda: None
         torch.cuda.is_available = lambda: False
+        torch.cuda.device_count = lambda: 0
+        torch.cuda.current_device = lambda: 0
+        torch.cuda.set_device = lambda *a, **k: None
+        torch.cuda.synchronize = lambda *a, **k: None
         torch.Tensor.cuda = lambda self, *a, **k: self
         torch.nn.Module.cuda = lambda self, *a, **k: self
+
+        _orig_t_to = torch.Tensor.to
+        _orig_m_to = torch.nn.Module.to
+
+        def _redir(args, kwargs):
+            new = []
+            for a in args:
+                if isinstance(a, str) and "cuda" in a:
+                    new.append("cpu")
+                elif isinstance(a, torch.device) and a.type == "cuda":
+                    new.append(torch.device("cpu"))
+                else:
+                    new.append(a)
+            if "device" in kwargs:
+                d = kwargs["device"]
+                if isinstance(d, str) and "cuda" in d:
+                    kwargs["device"] = "cpu"
+                elif isinstance(d, torch.device) and d.type == "cuda":
+                    kwargs["device"] = torch.device("cpu")
+            return tuple(new), kwargs
+
+        torch.Tensor.to = lambda self, *a, **k: _orig_t_to(self, *_redir(a, k)[0], **_redir(a, k)[1])
+        torch.nn.Module.to = lambda self, *a, **k: _orig_m_to(self, *_redir(a, k)[0], **_redir(a, k)[1])
+
         _orig_load = torch.load
         def _safe_load(*a, **k):
             k.setdefault("map_location", "cpu")
