@@ -48,6 +48,37 @@ def init_db():
         print(f"[db] init 失败: {e}")
 
 
+def start_job(kind: str, project_id: str, ref: str):
+    """创建一条 running 任务，返回 id（供后台完成时更新）。"""
+    if not enabled():
+        return None
+    try:
+        with _conn() as c:
+            cur = c.execute(
+                "INSERT INTO jobs (kind, project_id, ref, status, ok) VALUES (%s,%s,%s,'running',NULL) RETURNING id",
+                (kind, project_id, ref),
+            )
+            return cur.fetchone()[0]
+    except Exception as e:
+        print(f"[db] start_job 失败: {e}")
+        return None
+
+
+def finish_job(job_id, ok: bool, r2_prefix: str = "", detail: str = "", duration_sec: float = 0.0):
+    """更新任务为完成/失败。"""
+    if not enabled() or job_id is None:
+        return
+    try:
+        with _conn() as c:
+            c.execute(
+                "UPDATE jobs SET status=%s, ok=%s, r2_prefix=%s, detail=%s, duration_sec=%s WHERE id=%s",
+                ("done" if ok else "error", ok, r2_prefix, (detail or "")[:2000],
+                 round(duration_sec, 2), job_id),
+            )
+    except Exception as e:
+        print(f"[db] finish_job 失败: {e}")
+
+
 def record(kind: str, project_id: str, ref: str, ok: bool,
            r2_prefix: str = "", detail: str = "", duration_sec: float = 0.0):
     """写一条任务记录。失败只打印、不抛出（不能因为记录失败影响主流程）。"""

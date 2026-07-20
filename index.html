@@ -34,6 +34,7 @@
   .badge{padding:1px 8px;border-radius:10px;font-size:11px}
   .badge.done{background:rgba(78,203,141,.15);color:var(--ok)}
   .badge.error{background:rgba(224,153,95,.15);color:var(--warn)}
+  .badge.run{background:rgba(127,119,221,.18);color:#a9a2ee}
   #ops .log{background:#12141a;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12px;max-height:160px;overflow:auto;white-space:pre-wrap;color:#cdd2da}
   details{margin-top:8px}summary{cursor:pointer;color:var(--sub)}
 </style>
@@ -113,16 +114,29 @@ async function doAnalyze(){
   $('#btnAnalyze').disabled=true;
   const body={project_id:proj(),product:$('#product').value.trim()||'产品',
     cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked};
-  setStatus('分析中…多条广告可能要几分钟，别关页面');
-  logOps('▶ 开始分析项目 '+proj()+' …');
+  setStatus('提交分析…');logOps('▶ 提交分析项目 '+proj()+' …');
+  let jid=null;
   try{
     const r=await fetch('/analyze',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json();
-    logOps(d.ok?'✓ 分析完成':'✗ 分析失败: '+(d.log_tail||'').slice(-300));
-    setStatus(d.ok?'分析完成':'分析失败');
-    if(d.ok)await loadAll();else loadJobs();
-  }catch(e){logOps('✗ 分析异常 '+e.message);setStatus('分析失败')}
-  $('#btnAnalyze').disabled=false;
+    if(!d.started){logOps('✗ 启动失败');setStatus('启动失败');$('#btnAnalyze').disabled=false;return}
+    jid=d.job_id;
+    logOps('▶ 已在后台开始（任务#'+jid+'），分析中…可以离开，稍后回来看');
+  }catch(e){logOps('✗ 提交失败 '+e.message);setStatus('提交失败');$('#btnAnalyze').disabled=false;return}
+
+  setStatus('分析中…（后台运行，自动刷新）');
+  const timer=setInterval(async()=>{
+    try{
+      const jd=await api('/jobs?limit=30');
+      const job=(jd.jobs||[]).find(j=>j.id===jid);
+      if(job && job.status!=='running'){
+        clearInterval(timer);$('#btnAnalyze').disabled=false;
+        logOps(job.ok?('✓ 分析完成（#'+jid+'，'+job.duration_sec+'s）'):('✗ 分析失败（#'+jid+'）'));
+        setStatus(job.ok?'分析完成':'分析失败');
+        if(job.ok)loadAll();else loadJobs();
+      }else{loadJobs()}
+    }catch(e){}
+  },5000);
 }
 
 // ===== 查看 =====
@@ -135,7 +149,7 @@ async function loadJobs(){
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
     let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>状态</th><th>耗时(s)</th><th>时间</th></tr>';
-    d.jobs.forEach(j=>{h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td><span class="badge ${j.ok?'done':'error'}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td></tr>`});
+    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td><span class="badge ${cls}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td></tr>`});
     $('#jobs').innerHTML=h+'</table>';
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }

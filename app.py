@@ -25,6 +25,8 @@ import sys
 import subprocess
 import tempfile
 import shutil
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -72,10 +74,8 @@ def health():
     return {"ok": True, "service": "video-ad-analysis"}
 
 
-@app.post("/analyze")
-def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
-
+def _run_analyze_bg(req: "AnalyzeReq", job_id):
+    """后台线程跑分析，完成后更新数据库任务状态。"""
     cmd = [sys.executable, str(RUN_FROM_R2),
            "--project", req.project_id, "--product", req.product]
     if req.pipeline:
@@ -87,19 +87,29 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     if req.cross_compare:
         cmd.append("--cross-compare")
 
-    import time as _t
-    _t0 = _t.time()
-    proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
-    log = (proc.stdout or "") + (proc.stderr or "")
-    ok = proc.returncode == 0
-    db.record("analyze", req.project_id, req.product, ok,
-              f"projects/{req.project_id}/",
-              "" if ok else log[-500:], _t.time() - _t0)
+    t0 = time.time()
+    try:
+        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True)
+        log = (proc.stdout or "") + (proc.stderr or "")
+        ok = proc.returncode == 0
+        db.finish_job(job_id, ok, f"projects/{req.project_id}/",
+                      "" if ok else log[-800:], time.time() - t0)
+    except Exception as e:
+        db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+@app.post("/analyze")
+def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
+    """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
+    _check_token(x_api_token)
+    job_id = db.start_job("analyze", req.project_id, req.product)
+    threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
     return {
-        "ok": ok,
-        "returncode": proc.returncode,
+        "ok": True,
+        "started": True,
+        "job_id": job_id,
         "r2_prefix": f"projects/{req.project_id}/",
-        "log_tail": log[-4000:],
+        "note": "分析已在后台开始，查任务记录看进度",
     }
 
 
