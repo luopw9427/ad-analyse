@@ -113,52 +113,43 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     }
 
 
+def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id):
+    """后台线程：拆分 → 切片写回 R2 → 更新任务状态。"""
+    import splitter
+    import r2_storage as r2
+    t0 = time.time()
+    try:
+        out_dir = Path(work_str) / ad
+        shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
+        for fp in sorted(out_dir.iterdir()):
+            if fp.is_file():
+                r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
+        db.finish_job(job_id, True, f"projects/{project_id}/{ad}/",
+                      f"{len(shots)} shots", time.time() - t0)
+    except Exception as e:
+        db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
+    finally:
+        shutil.rmtree(work_str, ignore_errors=True)
+
+
 @app.post("/split")
 def split(project_id: str = Form(...),
           ad_id: str = Form(default=""),
           precise: bool = Form(default=True),
           file: UploadFile = File(...),
           x_api_token: str = Header(default="")):
-    """上传视频 → 云端拆分 → 切片+shots.json 写回 R2 projects/{project_id}/{ad_id}/。"""
+    """异步：先存上传文件，立即返回 job_id，后台拆分+回传，前端轮询 /jobs。"""
     _check_token(x_api_token)
-
-    import splitter
-    import r2_storage as r2
-    import traceback
     ad = ad_id or Path(file.filename or "ad").stem
     work = Path(tempfile.mkdtemp(prefix="split_"))
-    try:
-        video_path = work / (file.filename or "input.mp4")
-        with open(video_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
-
-        out_dir = work / ad
-        shots = splitter.split_video(str(video_path), str(out_dir), precise=precise)
-
-        # 回传切片 + shots.json 到 R2
-        uploaded = 0
-        for fp in sorted(out_dir.iterdir()):
-            if fp.is_file():
-                r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
-                uploaded += 1
-
-        db.record("split", project_id, ad, True,
-                  f"projects/{project_id}/{ad}/", f"{len(shots)} shots", 0.0)
-        return {
-            "ok": True,
-            "project_id": project_id,
-            "ad_id": ad,
-            "n_shots": len(shots),
-            "uploaded": uploaded,
-            "r2_prefix": f"projects/{project_id}/{ad}/",
-            "shots": shots,
-        }
-    except Exception as e:
-        db.record("split", project_id, ad, False, "", f"{type(e).__name__}: {e}", 0.0)
-        return {"ok": False, "error": f"{type(e).__name__}: {e}",
-                "trace": traceback.format_exc()[-3000:]}
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    video_path = work / (file.filename or "input.mp4")
+    with open(video_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    job_id = db.start_job("split", project_id, ad)
+    threading.Thread(target=_run_split_bg,
+                     args=(project_id, ad, str(video_path), str(work), precise, job_id),
+                     daemon=True).start()
+    return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad}
 
 
 @app.get("/result")
