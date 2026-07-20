@@ -40,6 +40,7 @@ import db
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
+_SPLIT_LOCK = threading.Lock()   # 拆分串行，避免并发抢 CPU/内存
 
 app = FastAPI(title="视频广告分析服务", version="0.3")
 
@@ -119,8 +120,9 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id):
     import r2_storage as r2
     t0 = time.time()
     try:
-        out_dir = Path(work_str) / ad
-        shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
+        with _SPLIT_LOCK:      # 同一时刻只跑一个拆分
+            out_dir = Path(work_str) / ad
+            shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
         for fp in sorted(out_dir.iterdir()):
             if fp.is_file():
                 r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))

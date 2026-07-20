@@ -44,6 +44,14 @@ def init_db():
                 )
             """)
         print("[db] jobs 表就绪")
+        # 服务重启说明之前的 running 任务已随进程消失，标记为中断，避免永远挂着
+        with _conn() as c:
+            cur = c.execute(
+                "UPDATE jobs SET status='error', ok=false,"
+                " detail='服务重启导致任务中断' WHERE status='running'")
+            n = cur.rowcount
+        if n:
+            print(f"[db] 已把 {n} 条孤儿 running 任务标记为中断")
     except Exception as e:
         print(f"[db] init 失败: {e}")
 
@@ -104,11 +112,11 @@ def recent(limit: int = 50):
     try:
         with _conn() as c:
             rows = c.execute(
-                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at"
+                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail"
                 " FROM jobs ORDER BY id DESC LIMIT %s", (limit,)
             ).fetchall()
         cols = ["id", "kind", "project_id", "ref", "status", "ok",
-                "r2_prefix", "duration_sec", "created_at"]
+                "r2_prefix", "duration_sec", "created_at", "detail"]
         out = []
         for r in rows:
             d = dict(zip(cols, r))
