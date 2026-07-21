@@ -85,8 +85,12 @@ class AnalyzeReq(BaseModel):
 
 @app.get("/")
 def home():
-    """结果查看网页（单页）。"""
-    return FileResponse(ROOT / "index.html")
+    """结果查看网页（单页）。禁用缓存，避免改版后浏览器仍显示旧页面。"""
+    return FileResponse(
+        ROOT / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate",
+                 "Pragma": "no-cache", "Expires": "0"},
+    )
 
 
 @app.get("/health")
