@@ -1,0 +1,29 @@
+name: Deploy Modal Splitter
+
+# 在 GitHub 服务器上执行 modal deploy（本地网络连不上 Modal 也没关系）
+on:
+  push:
+    branches: [main]
+    paths:
+      - "modal_splitter.py"
+      - ".github/workflows/deploy-modal.yml"
+  workflow_dispatch:        # 也可在 Actions 页面手动触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal
+        run: pip install --upgrade modal
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal_splitter.py
