@@ -47,8 +47,8 @@
 <header>
   <h1>视频广告分析</h1>
   <span class="muted">OpenRouter Key</span>
-  <input id="orkey" placeholder="sk-or-v1-..." type="password" size="16"
-         title="调用分析模型用的 OpenRouter 密钥。留空则用服务端配置的密钥。仅保存在你本地浏览器">
+  <input id="orkey" placeholder="留空=用服务端密钥" type="password" size="16"
+         title="留空即可：默认使用服务端(Railway 变量)里配置的 OpenRouter 密钥。只有想临时换一把 key 时才填，填了只保存在你本地浏览器，不会上传保存">
   <button class="eye" onclick="toggleEye('orkey',this)" title="显示/隐藏">👁</button>
   <span class="muted">项目名</span>
   <input id="project" placeholder="如 test" size="10"

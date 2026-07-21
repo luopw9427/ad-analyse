@@ -34,6 +34,19 @@ image = (
     )
 )
 
+# ── Modal 官方单价（美元/秒）与固定资源规格 ────────────────────────────
+# 固定 CPU/内存后单价完全确定，配合容器内实测存活时长即可按 Modal 的计费规则精算。
+GPU_USD_PER_SEC = 0.000164        # T4
+CPU_USD_PER_CORE_SEC = 0.0000131  # 每物理核
+MEM_USD_PER_GIB_SEC = 0.00000222  # 每 GiB
+CPU_CORES = 1.0
+MEM_GIB = 2.0
+SCALEDOWN_WINDOW = 60             # 空闲多久后缩容（这段时间容器仍存活、仍计费）
+
+RATE_USD_PER_SEC = (GPU_USD_PER_SEC
+                    + CPU_USD_PER_CORE_SEC * CPU_CORES
+                    + MEM_USD_PER_GIB_SEC * MEM_GIB)
+
 r2_secret = modal.Secret.from_name("r2-credentials")
 auth_secret = modal.Secret.from_name("split-auth")
 
@@ -41,8 +54,10 @@ auth_secret = modal.Secret.from_name("split-auth")
 @app.cls(
     image=image,
     gpu="T4",
+    cpu=CPU_CORES,
+    memory=int(MEM_GIB * 1024),
     secrets=[r2_secret, auth_secret],
-    scaledown_window=300,   # 空闲 5 分钟才缩容：批量拆分时只有首条有冷启动
+    scaledown_window=SCALEDOWN_WINDOW,
     timeout=1800,
 )
 class Splitter:
@@ -50,6 +65,11 @@ class Splitter:
     @modal.enter()
     def load_model(self):
         """容器启动时把 TransNetV2 加载到 GPU（此处 CUDA 可用，无需任何 patch）。"""
+        import time as _t
+        # 计费起点：容器一启动就开始计费（含拉镜像后的初始化、加载模型）
+        self.container_start = _t.time()
+        self.billed_until = 0.0     # 已计费到的容器存活秒数
+        self.first_call = True      # 保温尾巴按「每个容器一次」计入
         import torch
         from transnetv2pt.inference import model
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -180,10 +200,24 @@ class Splitter:
                                ExtraArgs={"ContentType": ctype})
                 uploaded += 1
 
+            # ── 按 Modal 计费规则精算本次调用应摊的费用 ──
+            # 计费 = 容器存活时长 × 单价。每次调用摊「自上次调用结束以来新增的存活时长」
+            # （天然包含冷启动和调用间隙），容器的保温尾巴按每容器一次计入首次调用。
+            uptime_end = time.time() - self.container_start
+            billed = uptime_end - self.billed_until
+            if self.first_call:
+                billed += SCALEDOWN_WINDOW
+                self.first_call = False
+            self.billed_until = uptime_end
+
             return {
                 "ok": True, "n_shots": len(shots), "uploaded": uploaded,
                 "r2_prefix": prefix, "shots": shots,
                 "device": self.device, "elapsed": round(time.time() - t0, 2),
+                "billed_seconds": round(billed, 2),
+                "container_uptime": round(uptime_end, 2),
+                "cost_usd": round(billed * RATE_USD_PER_SEC, 6),
+                "rate_usd_per_sec": RATE_USD_PER_SEC,
             }
         except Exception as e:
             return {"ok": False, "error": f"{type(e).__name__}: {e}",

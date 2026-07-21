@@ -42,8 +42,8 @@ RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 MODAL_SPLIT_URL = os.environ.get("MODAL_SPLIT_URL", "")     # Modal GPU 拆分接口
 MODAL_SPLIT_TOKEN = os.environ.get("MODAL_SPLIT_TOKEN", "")
-# Modal T4 综合单价（美元/秒）。Starter 计划无账单 API，只能按耗时估算，可用变量校准
-MODAL_USD_PER_SEC = float(os.environ.get("MODAL_USD_PER_SEC", "0.0002"))
+# 拆分成本由 Modal 侧按其计费规则精算后返回（容器实测存活时长 × 固定资源单价），
+# 这里直接采用，不在 Railway 端二次估算。
 
 import re as _re
 _COST_RE = _re.compile(r"cost=\$([0-9.]+)")
@@ -185,9 +185,12 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
             data = _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw)
             n = data.get("n_shots", 0)
             elapsed = float(data.get("elapsed") or 0)
+            billed = float(data.get("billed_seconds") or 0)
+            cost = float(data.get("cost_usd") or 0)
             db.finish_job(job_id, True, data.get("r2_prefix", ""),
-                          f"{n} shots (GPU {elapsed}s)", time.time() - t0,
-                          cost_usd=elapsed * MODAL_USD_PER_SEC, cost_exact=False)
+                          f"{n} shots (GPU 执行{elapsed}s / 计费{billed}s)",
+                          time.time() - t0,
+                          cost_usd=cost, cost_exact=False)
         else:
             import splitter
             with _SPLIT_LOCK:      # CPU 拆分串行，避免抢资源
