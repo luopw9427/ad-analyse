@@ -193,7 +193,8 @@ function copyBtn(t){const b=document.createElement('button');b.className='copy';
 function promptBlock(t){const d=document.createElement('div');d.className='prompt';d.textContent=t;d.appendChild(copyBtn(t));return d}
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
 
-async function viewJob(kind,ref){
+async function viewJob(kind,ref,detail,status){
+  if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail)}
   await loadAll();
   if(ref){
     const el=document.getElementById('ad-'+ref);
@@ -261,7 +262,7 @@ async function loadJobs(){
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
     let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr>';
-    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
+    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
     $('#jobs').innerHTML=h+'</table>';
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }
