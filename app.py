@@ -42,8 +42,15 @@ RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 MODAL_SPLIT_URL = os.environ.get("MODAL_SPLIT_URL", "")     # Modal GPU 拆分接口
 MODAL_SPLIT_TOKEN = os.environ.get("MODAL_SPLIT_TOKEN", "")
-# 拆分成本由 Modal 侧按其计费规则精算后返回（容器实测存活时长 × 固定资源单价），
-# 这里直接采用，不在 Railway 端二次估算。
+# ── 拆分成本模型 ────────────────────────────────────────────────
+# Modal 按容器存活时长 × 资源单价计费（官方价：T4 $0.59/h、CPU $0.0473/核/h、内存 $0.0080/GiB/h）。
+# 容器规格固定为 T4 + 1核 + 2GiB，故单价确定：
+MODAL_RATE_USD_PER_SEC = float(os.environ.get("MODAL_RATE_USD_PER_SEC", "0.00018147"))
+# 关键：冷启动（拉镜像→装载CUDA→模型上GPU）这段发生在容器内计时之前，测不到，只能建模。
+# 由三次实测反推：计费时长 165/275/220 秒，而执行仅 19~28 秒 → 冷启动约 180 秒。
+# 想更准就按 Modal 后台 Usage 的实际增量调这个值（不用改代码，Railway 变量即可）。
+MODAL_COLD_START_SEC = float(os.environ.get("MODAL_COLD_START_SEC", "180"))
+MODAL_COST_MULTIPLIER = float(os.environ.get("MODAL_COST_MULTIPLIER", "1.0"))
 
 import re as _re
 _COST_RE = _re.compile(r"cost=\$([0-9.]+)")
@@ -186,11 +193,13 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
             n = data.get("n_shots", 0)
             elapsed = float(data.get("elapsed") or 0)
             billed = float(data.get("billed_seconds") or 0)
-            cost = float(data.get("cost_usd") or 0)
-            boot = data.get("boot_overhead")
-            cold = "冷启动" if data.get("cold_start") else "热容器"
+            # 成本 = (容器内实测计费秒数 + 冷启动开销) × 单价
+            cold = bool(data.get("cold_start"))
+            billed_total = billed + (MODAL_COLD_START_SEC if cold else 0.0)
+            cost = billed_total * MODAL_RATE_USD_PER_SEC * MODAL_COST_MULTIPLIER
             db.finish_job(job_id, True, data.get("r2_prefix", ""),
-                          f"{n} shots · GPU {cold} · 执行{elapsed}s / 启动{boot}s / 计费{billed}s",
+                          f"{n} shots · GPU {'冷启动' if cold else '热容器'} · "
+                          f"执行{elapsed}s / 计费{billed_total:.0f}s",
                           time.time() - t0,
                           cost_usd=cost, cost_exact=False)
         else:
