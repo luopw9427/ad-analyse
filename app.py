@@ -108,7 +108,7 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
 def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
     _check_token(x_api_token)
-    job_id = db.start_job("analyze", req.project_id, req.product)
+    job_id = db.start_job("analyze", req.project_id, req.product, product=req.product)
     threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
     return {
         "ok": True,

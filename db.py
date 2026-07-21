@@ -45,6 +45,7 @@ def init_db():
             """)
             # 已存在的表补列（幂等）
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS engine TEXT")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS product TEXT")
         print("[db] jobs 表就绪")
         # 服务重启说明之前的 running 任务已随进程消失，标记为中断，避免永远挂着
         with _conn() as c:
@@ -58,16 +59,16 @@ def init_db():
         print(f"[db] init 失败: {e}")
 
 
-def start_job(kind: str, project_id: str, ref: str, engine: str = ""):
+def start_job(kind: str, project_id: str, ref: str, engine: str = "", product: str = ""):
     """创建一条 running 任务，返回 id（供后台完成时更新）。"""
     if not enabled():
         return None
     try:
         with _conn() as c:
             cur = c.execute(
-                "INSERT INTO jobs (kind, project_id, ref, status, ok, engine)"
-                " VALUES (%s,%s,%s,'running',NULL,%s) RETURNING id",
-                (kind, project_id, ref, engine),
+                "INSERT INTO jobs (kind, project_id, ref, status, ok, engine, product)"
+                " VALUES (%s,%s,%s,'running',NULL,%s,%s) RETURNING id",
+                (kind, project_id, ref, engine, product),
             )
             return cur.fetchone()[0]
     except Exception as e:
@@ -144,11 +145,11 @@ def recent(limit: int = 50):
     try:
         with _conn() as c:
             rows = c.execute(
-                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine"
+                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product"
                 " FROM jobs ORDER BY id DESC LIMIT %s", (limit,)
             ).fetchall()
         cols = ["id", "kind", "project_id", "ref", "status", "ok",
-                "r2_prefix", "duration_sec", "created_at", "detail", "engine"]
+                "r2_prefix", "duration_sec", "created_at", "detail", "engine", "product"]
         out = []
         for r in rows:
             d = dict(zip(cols, r))

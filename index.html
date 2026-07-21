@@ -45,9 +45,12 @@
 <body>
 <header>
   <h1>视频广告分析</h1>
-  <input id="project" placeholder="项目名" value="test" size="10">
-  <input id="product" placeholder="产品名" size="10">
-  <input id="token" placeholder="访问口令" type="password" size="12">
+  <span class="muted">项目名</span>
+  <input id="project" placeholder="如 test" size="12"
+         title="一批广告用同一个项目名。R2 里按 projects/{项目名}/{广告}/ 存放，分析和横向对比也按项目为单位">
+  <span class="muted">访问口令</span>
+  <input id="token" placeholder="APP_TOKEN" type="password" size="12"
+         title="服务端设置的 APP_TOKEN，用于调用接口鉴权。填一次会记住">
   <button onclick="loadAll()">加载结果</button>
   <span id="status" class="muted"></span>
 </header>
@@ -75,8 +78,12 @@
       <label class="ck"><input type="checkbox" id="ow"> 强制重跑</label>
     </div>
     <div class="row">
-      <span class="muted">前置卖点（可选，逗号分隔，给分析模型作参考）：</span>
-      <input id="hyp" placeholder="如：免养护,开箱即用,送礼首选" size="40">
+      <span class="muted">产品名</span>
+      <input id="product" placeholder="如 钻石画" size="14"
+             title="这批广告卖的产品，作为提示传给分析模型（只影响分析，不影响拆分）">
+      <span class="muted">前置卖点（可选）</span>
+      <input id="hyp" placeholder="如：免养护,开箱即用,送礼首选" size="32"
+             title="已知的卖点，逗号分隔。供分析模型参考验证，可留空">
     </div>
     <div class="log" id="opslog"></div>
   </div>
@@ -261,8 +268,8 @@ async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
-    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr>';
-    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
+    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr>';
+    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
     $('#jobs').innerHTML=h+'</table>';
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }
