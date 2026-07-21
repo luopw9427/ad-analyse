@@ -171,6 +171,20 @@ PROMPT = """你是资深广告分镜师兼 AI 视频生成 prompt 工程师。
 # 三、主函数
 # ============================================================
 
+def _usage_cost(usage) -> float:
+    """OpenRouter 每次响应都会带真实扣费金额（usage.cost）。取不到则返回 0。"""
+    if usage is None:
+        return 0.0
+    c = getattr(usage, "cost", None)
+    if c is None:
+        extra = getattr(usage, "model_extra", None) or {}
+        c = extra.get("cost")
+    try:
+        return float(c or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def generate_common_shot_prompts(
     root: Path,
     product_name: str,
@@ -256,7 +270,7 @@ def generate_common_shot_prompts(
             )
             usage = getattr(resp, "usage", None)
             if usage:
-                print(f"[CommonShotPrompts] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens}")
+                print(f"[CommonShotPrompts] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens} / cost=${_usage_cost(usage):.6f}")
             finish = resp.choices[0].finish_reason
             raw_check = (resp.choices[0].message.content or "").strip()
             token_zero = usage and usage.completion_tokens == 0

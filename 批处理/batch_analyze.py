@@ -124,6 +124,20 @@ COMPARE_PROMPT = """你是资深广告策略分析师。基于以下 N 条广告
 # 工具函数
 # ============================================================
 
+def _usage_cost(usage) -> float:
+    """OpenRouter 每次响应都会带真实扣费金额（usage.cost）。取不到则返回 0。"""
+    if usage is None:
+        return 0.0
+    c = getattr(usage, "cost", None)
+    if c is None:
+        extra = getattr(usage, "model_extra", None) or {}
+        c = extra.get("cost")
+    try:
+        return float(c or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def find_ad_folders(root: Path) -> List[Path]:
     """扫描根目录下含 shot_*.mp4 的子文件夹。"""
     ad_folders = []
@@ -278,7 +292,7 @@ def _call_compare_llm(prompt_text: str, model: str) -> str:
             )
             usage = getattr(resp, "usage", None)
             if usage:
-                print(f"[横向对比] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens}")
+                print(f"[横向对比] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens} / cost=${_usage_cost(usage):.6f}")
             finish = resp.choices[0].finish_reason
             raw = (resp.choices[0].message.content or "").strip()
             if finish == "error" or (usage and usage.completion_tokens == 0) or len(raw) < 30:

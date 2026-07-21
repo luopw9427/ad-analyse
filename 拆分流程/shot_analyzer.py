@@ -274,6 +274,20 @@ shot_intent_one_liner 沿用 Round 1 的（可微调）。
 # 四、调用 OpenRouter
 # ============================================================
 
+def _usage_cost(usage) -> float:
+    """OpenRouter 每次响应都会带真实扣费金额（usage.cost）。取不到则返回 0。"""
+    if usage is None:
+        return 0.0
+    c = getattr(usage, "cost", None)
+    if c is None:
+        extra = getattr(usage, "model_extra", None) or {}
+        c = extra.get("cost")
+    try:
+        return float(c or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def build_hint_block(
     product: str,
     action: Optional[str] = None,
@@ -363,7 +377,7 @@ def _call_openrouter(client, model: str, content: list, round_label: str,
             usage = getattr(resp, "usage", None)
             if usage:
                 print(
-                    f"    [{round_label}] usage: prompt={usage.prompt_tokens} / "
+                    f"    [{round_label}] usage: prompt={usage.prompt_tokens} / cost=${_usage_cost(usage):.6f} / "
                     f"completion={usage.completion_tokens} / total={usage.total_tokens}"
                 )
             raw = (resp.choices[0].message.content or "").strip()
@@ -718,7 +732,7 @@ def summarize_to_business_json(
             finish = resp.choices[0].finish_reason
             usage = getattr(resp, "usage", None)
             if usage:
-                print(f"[汇总] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens}")
+                print(f"[汇总] usage: prompt={usage.prompt_tokens} / completion={usage.completion_tokens} / cost=${_usage_cost(usage):.6f}")
 
             if finish == "error" or (usage and usage.completion_tokens == 0):
                 print(f"[汇总] [重试 {attempt}/3] finish={finish}")

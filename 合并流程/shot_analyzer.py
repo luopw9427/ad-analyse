@@ -217,6 +217,20 @@ PROMPT = """你是资深广告镜头拆解分析师。请把这一个镜头拆�
 # 三、调用 OpenRouter
 # ============================================================
 
+def _usage_cost(usage) -> float:
+    """OpenRouter 每次响应都会带真实扣费金额（usage.cost）。取不到则返回 0。"""
+    if usage is None:
+        return 0.0
+    c = getattr(usage, "cost", None)
+    if c is None:
+        extra = getattr(usage, "model_extra", None) or {}
+        c = extra.get("cost")
+    try:
+        return float(c or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def build_hint_block(
     product: str,
     action: Optional[str] = None,
@@ -376,6 +390,7 @@ def analyze_shot(
                 print(
                     f"    ├─ usage: prompt={usage.prompt_tokens} / "
                     f"completion={usage.completion_tokens} / total={usage.total_tokens}"
+                    f" / cost=${_usage_cost(usage):.6f}"
                 )
             finish = resp.choices[0].finish_reason
             raw_check = (resp.choices[0].message.content or "").strip()
@@ -630,6 +645,11 @@ def summarize_to_business_json(
         temperature=0.2,
         **req_kwargs,
     )
+
+    _u = getattr(resp, "usage", None)
+    if _u:
+        print(f"[汇总] usage: prompt={_u.prompt_tokens} / completion={_u.completion_tokens}"
+              f" / cost=${_usage_cost(_u):.6f}")
 
     raw = (resp.choices[0].message.content or "").strip()
     if raw.startswith("```"):

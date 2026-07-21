@@ -46,6 +46,10 @@ def init_db():
             # 已存在的表补列（幂等）
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS engine TEXT")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS product TEXT")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cost_usd REAL DEFAULT 0")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tokens_in INTEGER DEFAULT 0")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tokens_out INTEGER DEFAULT 0")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cost_exact BOOLEAN DEFAULT true")
         print("[db] jobs 表就绪")
         # 服务重启说明之前的 running 任务已随进程消失，标记为中断，避免永远挂着
         with _conn() as c:
@@ -76,16 +80,20 @@ def start_job(kind: str, project_id: str, ref: str, engine: str = "", product: s
         return None
 
 
-def finish_job(job_id, ok: bool, r2_prefix: str = "", detail: str = "", duration_sec: float = 0.0):
+def finish_job(job_id, ok: bool, r2_prefix: str = "", detail: str = "", duration_sec: float = 0.0,
+               cost_usd: float = 0.0, tokens_in: int = 0, tokens_out: int = 0,
+               cost_exact: bool = True):
     """更新任务为完成/失败。"""
     if not enabled() or job_id is None:
         return
     try:
         with _conn() as c:
             c.execute(
-                "UPDATE jobs SET status=%s, ok=%s, r2_prefix=%s, detail=%s, duration_sec=%s WHERE id=%s",
+                "UPDATE jobs SET status=%s, ok=%s, r2_prefix=%s, detail=%s, duration_sec=%s,"
+                " cost_usd=%s, tokens_in=%s, tokens_out=%s, cost_exact=%s WHERE id=%s",
                 ("done" if ok else "error", ok, r2_prefix, (detail or "")[:2000],
-                 round(duration_sec, 2), job_id),
+                 round(duration_sec, 2), round(cost_usd, 6), tokens_in, tokens_out,
+                 cost_exact, job_id),
             )
     except Exception as e:
         print(f"[db] finish_job 失败: {e}")
@@ -145,11 +153,12 @@ def recent(limit: int = 50):
     try:
         with _conn() as c:
             rows = c.execute(
-                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product"
+                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product, cost_usd, tokens_in, tokens_out, cost_exact"
                 " FROM jobs ORDER BY id DESC LIMIT %s", (limit,)
             ).fetchall()
         cols = ["id", "kind", "project_id", "ref", "status", "ok",
-                "r2_prefix", "duration_sec", "created_at", "detail", "engine", "product"]
+                "r2_prefix", "duration_sec", "created_at", "detail", "engine", "product",
+                "cost_usd", "tokens_in", "tokens_out", "cost_exact"]
         out = []
         for r in rows:
             d = dict(zip(cols, r))
