@@ -41,11 +41,22 @@ CPU_USD_PER_CORE_SEC = 0.0000131  # 每物理核
 MEM_USD_PER_GIB_SEC = 0.00000222  # 每 GiB
 CPU_CORES = 1.0
 MEM_GIB = 2.0
-SCALEDOWN_WINDOW = 60             # 空闲多久后缩容（这段时间容器仍存活、仍计费）
+SCALEDOWN_WINDOW = 30             # 空闲多久后缩容（这段时间容器仍存活、仍计费）
 
 RATE_USD_PER_SEC = (GPU_USD_PER_SEC
                     + CPU_USD_PER_CORE_SEC * CPU_CORES
                     + MEM_USD_PER_GIB_SEC * MEM_GIB)
+
+def _container_uptime() -> float:
+    """容器（gVisor 沙箱）自身的存活秒数。
+    Modal 从容器创建就计费，这段包含拉镜像、启动 Python、import torch、CUDA 初始化，
+    在 @modal.enter 里打时间戳是量不到的——必须读容器自己的 uptime。"""
+    try:
+        with open("/proc/uptime") as f:
+            return float(f.read().split()[0])
+    except Exception:
+        return 0.0
+
 
 r2_secret = modal.Secret.from_name("r2-credentials")
 auth_secret = modal.Secret.from_name("split-auth")
@@ -66,10 +77,10 @@ class Splitter:
     def load_model(self):
         """容器启动时把 TransNetV2 加载到 GPU（此处 CUDA 可用，无需任何 patch）。"""
         import time as _t
-        # 计费起点：容器一启动就开始计费（含拉镜像后的初始化、加载模型）
         self.container_start = _t.time()
-        self.billed_until = 0.0     # 已计费到的容器存活秒数
+        self.billed_until = 0.0     # 已计费到的「容器 uptime」秒数（从 0 开始 = 含启动开销）
         self.first_call = True      # 保温尾巴按「每个容器一次」计入
+        self.enter_uptime = _container_uptime()   # 进入 enter 时容器已存活多久（即启动开销）
         import torch
         from transnetv2pt.inference import model
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -203,10 +214,11 @@ class Splitter:
             # ── 按 Modal 计费规则精算本次调用应摊的费用 ──
             # 计费 = 容器存活时长 × 单价。每次调用摊「自上次调用结束以来新增的存活时长」
             # （天然包含冷启动和调用间隙），容器的保温尾巴按每容器一次计入首次调用。
-            uptime_end = time.time() - self.container_start
-            billed = uptime_end - self.billed_until
+            uptime_end = _container_uptime() or (time.time() - self.container_start)
+            billed = uptime_end - self.billed_until      # 首次调用时 billed_until=0，故含容器启动开销
+            cold = self.first_call
             if self.first_call:
-                billed += SCALEDOWN_WINDOW
+                billed += SCALEDOWN_WINDOW               # 保温尾巴按每容器计一次
                 self.first_call = False
             self.billed_until = uptime_end
 
@@ -216,6 +228,8 @@ class Splitter:
                 "device": self.device, "elapsed": round(time.time() - t0, 2),
                 "billed_seconds": round(billed, 2),
                 "container_uptime": round(uptime_end, 2),
+                "boot_overhead": round(self.enter_uptime, 2),   # 容器启动到加载模型前的开销
+                "cold_start": cold,
                 "cost_usd": round(billed * RATE_USD_PER_SEC, 6),
                 "rate_usd_per_sec": RATE_USD_PER_SEC,
             }

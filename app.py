@@ -187,8 +187,10 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
             elapsed = float(data.get("elapsed") or 0)
             billed = float(data.get("billed_seconds") or 0)
             cost = float(data.get("cost_usd") or 0)
+            boot = data.get("boot_overhead")
+            cold = "冷启动" if data.get("cold_start") else "热容器"
             db.finish_job(job_id, True, data.get("r2_prefix", ""),
-                          f"{n} shots (GPU 执行{elapsed}s / 计费{billed}s)",
+                          f"{n} shots · GPU {cold} · 执行{elapsed}s / 启动{boot}s / 计费{billed}s",
                           time.time() - t0,
                           cost_usd=cost, cost_exact=False)
         else:
