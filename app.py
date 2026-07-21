@@ -224,3 +224,14 @@ def delete(req: DeleteReq, x_api_token: str = Header(default="")):
 
     jobs_deleted = db.delete_jobs(req.project_id) if req.clear_jobs else 0
     return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}
+
+
+class JobDeleteReq(BaseModel):
+    job_id: int
+
+
+@app.post("/jobs/delete")
+def jobs_delete(req: JobDeleteReq, x_api_token: str = Header(default="")):
+    """删除单条任务记录（不动 R2 文件）。"""
+    _check_token(x_api_token)
+    return {"ok": True, "deleted": db.delete_job(req.job_id)}

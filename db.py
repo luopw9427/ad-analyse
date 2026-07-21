@@ -106,6 +106,19 @@ def record(kind: str, project_id: str, ref: str, ok: bool,
         return None
 
 
+def delete_job(job_id: int) -> int:
+    """删除单条任务记录。"""
+    if not enabled():
+        return 0
+    try:
+        with _conn() as c:
+            cur = c.execute("DELETE FROM jobs WHERE id=%s", (job_id,))
+            return cur.rowcount
+    except Exception as e:
+        print(f"[db] delete_job 失败: {e}")
+        return 0
+
+
 def delete_jobs(project_id: str = "") -> int:
     """删除任务记录：给了 project_id 只删该项目，否则清空。"""
     if not enabled():

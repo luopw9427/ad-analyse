@@ -35,6 +35,9 @@
   .badge.done{background:rgba(78,203,141,.15);color:var(--ok)}
   .badge.error{background:rgba(224,153,95,.15);color:var(--warn)}
   .badge.run{background:rgba(127,119,221,.18);color:#a9a2ee}
+  button.mini{padding:2px 8px;font-size:11px;background:#2a2f3a;margin-right:4px}
+  button.mini.del{background:transparent;border:1px solid var(--warn);color:var(--warn)}
+  td.ops{white-space:nowrap}
   #ops .log{background:#12141a;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12px;max-height:160px;overflow:auto;white-space:pre-wrap;color:#cdd2da}
   details{margin-top:8px}summary{cursor:pointer;color:var(--sub)}
 </style>
@@ -183,6 +186,35 @@ function copyBtn(t){const b=document.createElement('button');b.className='copy';
 function promptBlock(t){const d=document.createElement('div');d.className='prompt';d.textContent=t;d.appendChild(copyBtn(t));return d}
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
 
+async function viewJob(kind,ref){
+  await loadAll();
+  if(ref){
+    const el=document.getElementById('ad-'+ref);
+    if(el){el.scrollIntoView({behavior:'smooth',block:'start'});el.style.outline='2px solid var(--acc)';
+      setTimeout(()=>el.style.outline='',2000);}
+    else logOps('（结果里没有「'+ref+'」这条广告，可能已删除或尚未分析）');
+  }
+}
+
+async function delJob(id,kind,ref){
+  if(!tok()){alert('先填访问口令');return}
+  if(!confirm('删除任务记录 #'+id+'（'+kind+' '+ref+'）？\n\n这只删记录，不影响 R2 文件。'))return;
+  try{
+    const r=await fetch('/jobs/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:id})});
+    const d=await r.json();logOps('✓ 已删除任务记录 #'+id);
+  }catch(e){logOps('✗ 删除记录失败 '+e.message)}
+  // 拆分任务：再问是否连 R2 文件一起删
+  if(kind==='split'&&ref&&confirm('是否同时删除广告「'+ref+'」在 R2 的全部文件？\n（切片+分析产物，不可恢复）')){
+    try{
+      const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+        body:JSON.stringify({project_id:proj(),ad_id:ref,analysis_only:false,clear_jobs:false})});
+      const d=await r.json();logOps('✓ 已删除 R2 文件 '+d.deleted+' 个（'+ref+'）');
+    }catch(e){logOps('✗ 删除文件失败 '+e.message)}
+  }
+  loadJobs();
+}
+
 async function doDelete(single,analysisOnly){
   remember();if(!tok()){alert('先填访问口令');return}
   const ad=single?$('#delAd').value.trim():'';
@@ -210,8 +242,8 @@ async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
-    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>状态</th><th>耗时(s)</th><th>时间</th></tr>';
-    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td><span class="badge ${cls}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td></tr>`});
+    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>状态</th><th>耗时(s)</th><th>时间</th><th>操作</th></tr>';
+    d.jobs.forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td><span class="badge ${cls}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
     $('#jobs').innerHTML=h+'</table>';
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }
@@ -237,7 +269,7 @@ async function loadAll(){
 }
 
 function renderAd(ad,d,videos){
-  const c=document.createElement('div');c.className='card';const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
+  const c=document.createElement('div');c.className='card';c.id='ad-'+ad;const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
   c.innerHTML=`<h2>广告：${ad} <span class="muted" style="font-weight:400">· ${agg.total_duration||'?'}s · ${(vp.广告结构分类&&vp.广告结构分类.主结构)||''}</span></h2>`;
   if(agg.广告主张){const p=document.createElement('div');p.innerHTML='<b>主张：</b>'+agg.广告主张;c.appendChild(p)}
   if(videos.length){const h=document.createElement('h3');h.textContent='镜头切片';c.appendChild(h);const w=document.createElement('div');w.className='shots';videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;w.appendChild(v)});c.appendChild(w)}
