@@ -40,6 +40,8 @@ import db
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
+MODAL_SPLIT_URL = os.environ.get("MODAL_SPLIT_URL", "")     # Modal GPU 拆分接口
+MODAL_SPLIT_TOKEN = os.environ.get("MODAL_SPLIT_TOKEN", "")
 _SPLIT_LOCK = threading.Lock()   # 拆分串行，避免并发抢 CPU/内存
 
 app = FastAPI(title="视频广告分析服务", version="0.3")
@@ -117,20 +119,57 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     }
 
 
-def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id):
-    """后台线程：拆分 → 切片写回 R2 → 更新任务状态。"""
-    import splitter
+def _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw):
+    """GPU 路径：原视频存 R2 → 调 Modal → Modal 直接把切片写回 R2。"""
+    import requests
+    import r2_storage as r2
+    if not MODAL_SPLIT_URL or not MODAL_SPLIT_TOKEN:
+        raise RuntimeError("未配置 MODAL_SPLIT_URL / MODAL_SPLIT_TOKEN")
+
+    raw_key = f"raw/{project_id}/{ad}.mp4"
+    r2.upload_file(raw_key, video_path_str)
+    try:
+        resp = requests.post(
+            MODAL_SPLIT_URL,
+            json={"token": MODAL_SPLIT_TOKEN, "project_id": project_id,
+                  "ad_id": ad, "raw_key": raw_key, "precise": precise},
+            timeout=1800,
+        )
+        data = resp.json()
+    except Exception as e:
+        raise RuntimeError(f"调用 Modal 失败: {e}")
+    if not data.get("ok"):
+        raise RuntimeError(f"Modal 拆分失败: {data.get('error') or resp.status_code}")
+
+    if not keep_raw:
+        try:
+            r2.delete_keys([raw_key])
+        except Exception as e:
+            print(f"[split] 清理原视频失败（不影响结果）: {e}")
+    return data
+
+
+def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
+                  engine="cpu", keep_raw=False):
+    """后台线程：按引擎拆分 → 切片写回 R2 → 更新任务状态。"""
     import r2_storage as r2
     t0 = time.time()
     try:
-        with _SPLIT_LOCK:      # 同一时刻只跑一个拆分
-            out_dir = Path(work_str) / ad
-            shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
-        for fp in sorted(out_dir.iterdir()):
-            if fp.is_file():
-                r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
-        db.finish_job(job_id, True, f"projects/{project_id}/{ad}/",
-                      f"{len(shots)} shots", time.time() - t0)
+        if engine == "gpu":
+            data = _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw)
+            n = data.get("n_shots", 0)
+            db.finish_job(job_id, True, data.get("r2_prefix", ""),
+                          f"{n} shots (GPU {data.get('elapsed','?')}s)", time.time() - t0)
+        else:
+            import splitter
+            with _SPLIT_LOCK:      # CPU 拆分串行，避免抢资源
+                out_dir = Path(work_str) / ad
+                shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
+            for fp in sorted(out_dir.iterdir()):
+                if fp.is_file():
+                    r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
+            db.finish_job(job_id, True, f"projects/{project_id}/{ad}/",
+                          f"{len(shots)} shots (CPU)", time.time() - t0)
     except Exception as e:
         db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
     finally:
@@ -141,6 +180,8 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id):
 def split(project_id: str = Form(...),
           ad_id: str = Form(default=""),
           precise: bool = Form(default=True),
+          engine: str = Form(default="cpu"),        # cpu / gpu
+          keep_raw: bool = Form(default=False),     # GPU 路径是否保留原视频
           file: UploadFile = File(...),
           x_api_token: str = Header(default="")):
     """异步：先存上传文件，立即返回 job_id，后台拆分+回传，前端轮询 /jobs。"""
@@ -150,11 +191,13 @@ def split(project_id: str = Form(...),
     video_path = work / (file.filename or "input.mp4")
     with open(video_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    job_id = db.start_job("split", project_id, ad)
+    engine = (engine or "cpu").lower()
+    job_id = db.start_job("split", project_id, ad, engine=engine)
     threading.Thread(target=_run_split_bg,
-                     args=(project_id, ad, str(video_path), str(work), precise, job_id),
+                     args=(project_id, ad, str(video_path), str(work), precise,
+                           job_id, engine, keep_raw),
                      daemon=True).start()
-    return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad}
+    return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad, "engine": engine}
 
 
 @app.get("/result")

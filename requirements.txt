@@ -13,3 +13,4 @@ torch
 git+https://github.com/kunato/transnetv2pt.git
 static-ffmpeg
 psycopg[binary]
+requests
