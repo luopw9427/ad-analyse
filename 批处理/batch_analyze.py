@@ -145,7 +145,8 @@ def check_analysis_done(ad_folder: Path, pipeline: str) -> bool:
 
 
 def run_pipeline_for_ad(
-    ad_folder: Path, product: str, pipeline: str, pro: bool, overwrite: bool
+    ad_folder: Path, product: str, pipeline: str, pro: bool, overwrite: bool,
+    hypotheses: Optional[str] = None
 ) -> Optional[Path]:
     """
     跑单条广告的分析流程。
@@ -170,6 +171,8 @@ def run_pipeline_for_ad(
         cmd.append("--pro")
     if overwrite:
         cmd.append("--overwrite")
+    if hypotheses:
+        cmd += ["--hypotheses", hypotheses]
 
     print(f"    [跑 {pipeline}] {' '.join(cmd[:2])} ... --product {product}")
     proc = subprocess.run(cmd, cwd=str(PROJECT_ROOT))
@@ -185,6 +188,7 @@ def run_pipeline_for_ad(
 def process_ad(
     ad_folder: Path, product: str, pipeline: str, pro: bool, overwrite: bool,
     gen_shot_prompts: bool = True, shot_prompts_min_count: int = 7,
+    hypotheses: Optional[str] = None,
 ) -> dict:
     """
     处理一条广告：分析 → video_prompt.json → shot_prompts.json。
@@ -200,7 +204,7 @@ def process_ad(
 
     try:
         # Step A：分析
-        analysis_dir = run_pipeline_for_ad(ad_folder, product, pipeline, pro, overwrite)
+        analysis_dir = run_pipeline_for_ad(ad_folder, product, pipeline, pro, overwrite, hypotheses)
         if analysis_dir is None:
             result["status"] = "分析失败"
             return result
@@ -437,6 +441,7 @@ def parse_args():
     p.add_argument("--pro", action="store_true", help="用 gemini-2.5-pro")
     p.add_argument("--overwrite", action="store_true", help="强制重跑（不加则只补跑缺失的产物）")
     p.add_argument("--cross-compare", action="store_true", help="生成横向对比 md（默认关闭）")
+    p.add_argument("--hypotheses", default=None, help="前置卖点提示（可选，逗号分隔），供分析模型参考")
     p.add_argument("--no-shot-prompts", action="store_true", help="跳过每条广告的 shot_prompts.json 生成")
     p.add_argument("--shot-prompts-count", type=int, default=7, help="每条广告生成的独立镜头 prompt 数量（默认 7）")
     p.add_argument("--no-common-shot-prompts", action="store_true", help="跳过品类级共性镜头 prompt 生成")
@@ -481,6 +486,7 @@ def main():
             ad_folder, args.product, args.pipeline, args.pro, args.overwrite,
             gen_shot_prompts=not args.no_shot_prompts,
             shot_prompts_min_count=args.shot_prompts_count,
+            hypotheses=args.hypotheses,
         )
         results.append(r)
         print(f"    → 状态: {r['status']}")

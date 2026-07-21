@@ -165,6 +165,27 @@ def list_keys(prefix: str) -> list:
     return keys
 
 
+def delete_keys(keys: list) -> int:
+    """批量删除对象，返回删除数量。"""
+    if not keys:
+        return 0
+    client = get_client()
+    n = 0
+    for i in range(0, len(keys), 1000):          # S3 批量删除上限 1000
+        batch = [{"Key": k} for k in keys[i:i + 1000]]
+        _retry(client.delete_objects, Bucket=BUCKET,
+               Delete={"Objects": batch, "Quiet": True}, _what="批量删除")
+        n += len(batch)
+    return n
+
+
+def delete_prefix(prefix: str) -> int:
+    """删除某前缀下所有对象（如某个项目或某条广告）。"""
+    if not prefix or prefix in ("/", "projects/"):
+        raise ValueError("前缀太宽泛，拒绝删除")
+    return delete_keys(list_keys(prefix))
+
+
 def public_url(key: str) -> str:
     """拼公开访问 URL（bucket 已开 r2.dev 公开访问时可用）。"""
     return f"{PUBLIC_URL}/{key}" if PUBLIC_URL else key

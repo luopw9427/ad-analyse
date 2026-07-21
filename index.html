@@ -54,7 +54,7 @@
     <div class="row">
       <b>① 上传拆分：</b>
       <input type="file" id="files" accept="video/*" multiple>
-      <button id="btnSplit" onclick="doSplit()">拆分并上传</button>
+      <button id="btnSplit" onclick="doSplit()">上传并拆分</button>
       <label class="ck"><input type="checkbox" id="fast" checked> 快速切分(不重编码,快很多)</label>
       <span class="muted">文件名会作为广告 id</span>
     </div>
@@ -65,7 +65,25 @@
       <label class="ck"><input type="checkbox" id="pro"> 用更强模型(Pro,贵)</label>
       <label class="ck"><input type="checkbox" id="ow"> 强制重跑</label>
     </div>
+    <div class="row">
+      <span class="muted">前置卖点（可选，逗号分隔，给分析模型作参考）：</span>
+      <input id="hyp" placeholder="如：免养护,开箱即用,送礼首选" size="40">
+    </div>
     <div class="log" id="opslog"></div>
+  </div>
+
+  <div class="card">
+    <h2>存储管理 <span class="muted" style="font-weight:400;font-size:12px">· 删除后不可恢复</span></h2>
+    <div class="row">
+      <button class="ghost" onclick="doDelete(false,true)">仅删分析产物（保留切片）</button>
+      <button class="ghost" onclick="doDelete(false,false)">删除整个项目（含切片）</button>
+      <button class="ghost" onclick="clearJobs()">清空本项目任务记录</button>
+    </div>
+    <div class="row">
+      <span class="muted">删除单条广告：</span>
+      <input id="delAd" placeholder="广告 id，如 海马" size="14">
+      <button class="ghost" onclick="doDelete(true,false)">删除该广告</button>
+    </div>
   </div>
 
   <div class="card">
@@ -84,7 +102,8 @@ const setStatus=t=>$('#status').textContent=t||'';
 $('#token').value=localStorage.getItem('tok')||'';
 $('#project').value=localStorage.getItem('proj')||'test';
 $('#product').value=localStorage.getItem('prod')||'';
-function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim())}
+$('#hyp').value=localStorage.getItem('hyp')||'';
+function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim())}
 
 function setOps(t){$('#status').textContent=t||''}
 function logOps(t){const l=$('#opslog');l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
@@ -132,7 +151,8 @@ async function doAnalyze(){
   remember();if(!tok()){alert('先填访问口令');return}
   $('#btnAnalyze').disabled=true;
   const body={project_id:proj(),product:$('#product').value.trim()||'产品',
-    cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked};
+    cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked,
+    hypotheses:$('#hyp').value.trim()||null};
   setStatus('提交分析…');logOps('▶ 提交分析项目 '+proj()+' …');
   let jid=null;
   try{
@@ -162,6 +182,29 @@ async function doAnalyze(){
 function copyBtn(t){const b=document.createElement('button');b.className='copy';b.textContent='复制';b.onclick=()=>{navigator.clipboard.writeText(t);b.textContent='已复制';setTimeout(()=>b.textContent='复制',1200)};return b}
 function promptBlock(t){const d=document.createElement('div');d.className='prompt';d.textContent=t;d.appendChild(copyBtn(t));return d}
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
+
+async function doDelete(single,analysisOnly){
+  remember();if(!tok()){alert('先填访问口令');return}
+  const ad=single?$('#delAd').value.trim():'';
+  if(single&&!ad){alert('先填要删除的广告 id');return}
+  const what=analysisOnly?'分析产物':(single?('广告 '+ad+' 的全部文件'):('整个项目 '+proj()+' 的全部文件'));
+  if(!confirm('确定删除 '+what+' ？此操作不可恢复。'))return;
+  try{
+    const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({project_id:proj(),ad_id:ad||null,analysis_only:analysisOnly,clear_jobs:false})});
+    const d=await r.json();
+    logOps(d.ok?('✓ 已删除 '+d.deleted+' 个对象（'+d.scope+'）'):('✗ 删除失败 '+(d.detail||r.status)));
+    loadAll();
+  }catch(e){logOps('✗ 删除失败 '+e.message)}
+}
+async function clearJobs(){
+  if(!confirm('清空项目 '+proj()+' 的任务记录？'))return;
+  try{
+    const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({project_id:proj(),analysis_only:true,ad_id:'__none__',clear_jobs:true})});
+    const d=await r.json();logOps('✓ 已清理任务记录 '+d.jobs_deleted+' 条');loadJobs();
+  }catch(e){logOps('✗ 清理失败 '+e.message)}
+}
 
 async function loadJobs(){
   try{const d=await api('/jobs?limit=30');

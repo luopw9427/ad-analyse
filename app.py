@@ -62,6 +62,7 @@ class AnalyzeReq(BaseModel):
     pro: bool = False
     overwrite: bool = False
     cross_compare: bool = False
+    hypotheses: Optional[str] = None   # 前置卖点提示（可选，逗号分隔）
 
 
 @app.get("/")
@@ -87,6 +88,8 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         cmd.append("--overwrite")
     if req.cross_compare:
         cmd.append("--cross-compare")
+    if req.hypotheses:
+        cmd += ["--hypotheses", req.hypotheses]
 
     t0 = time.time()
     try:
@@ -187,3 +190,37 @@ def result(project_id: str, include_content: bool = True,
 def jobs(limit: int = 50, x_api_token: str = Header(default="")):
     _check_token(x_api_token)
     return {"jobs": db.recent(limit), "db_enabled": db.enabled()}
+
+
+class DeleteReq(BaseModel):
+    project_id: str
+    ad_id: Optional[str] = None        # 指定则只删该广告
+    analysis_only: bool = False        # 只删分析产物，保留切片
+    clear_jobs: bool = False           # 同时清理该项目的任务记录
+
+
+@app.post("/delete")
+def delete(req: DeleteReq, x_api_token: str = Header(default="")):
+    """删除 R2 上的产物，释放存储。"""
+    _check_token(x_api_token)
+    if not req.project_id:
+        raise HTTPException(status_code=400, detail="缺少 project_id")
+
+    if req.analysis_only:
+        # 只删分析产物：各广告的 analysis_output/ + 项目级汇总文件
+        prefix = f"projects/{req.project_id}/"
+        keys = [k for k in r2.list_keys(prefix)
+                if "/analysis_output" in k or k.endswith("共性镜头prompt.json")
+                or k.endswith("横向对比.md")]
+        if req.ad_id:
+            keys = [k for k in keys if k.startswith(f"{prefix}{req.ad_id}/")]
+        deleted = r2.delete_keys(keys)
+        scope = f"{req.project_id}/{req.ad_id or ''} 的分析产物"
+    else:
+        prefix = (f"projects/{req.project_id}/{req.ad_id}/"
+                  if req.ad_id else f"projects/{req.project_id}/")
+        deleted = r2.delete_prefix(prefix)
+        scope = prefix
+
+    jobs_deleted = db.delete_jobs(req.project_id) if req.clear_jobs else 0
+    return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}
