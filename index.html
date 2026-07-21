@@ -198,21 +198,32 @@ async function viewJob(kind,ref){
 
 async function delJob(id,kind,ref){
   if(!tok()){alert('先填访问口令');return}
-  if(!confirm('删除任务记录 #'+id+'（'+kind+' '+ref+'）？\n\n这只删记录，不影响 R2 文件。'))return;
-  try{
-    const r=await fetch('/jobs/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-      body:JSON.stringify({job_id:id})});
-    const d=await r.json();logOps('✓ 已删除任务记录 #'+id);
-  }catch(e){logOps('✗ 删除记录失败 '+e.message)}
-  // 拆分任务：再问是否连 R2 文件一起删
-  if(kind==='split'&&ref&&confirm('是否同时删除广告「'+ref+'」在 R2 的全部文件？\n（切片+分析产物，不可恢复）')){
+  let msg,delReq=null;
+  if(kind==='split'&&ref){
+    msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将一并删除广告「'+ref+'」在 R2 的全部文件：\n· 镜头切片\n· 该广告的分析产物\n\n不可恢复，确定？';
+    delReq={project_id:proj(),ad_id:ref,analysis_only:false,clear_jobs:false};
+  }else if(kind==='analyze'){
+    msg='删除任务 #'+id+'（分析 '+ref+'）\n\n将一并删除项目「'+proj()+'」的分析产物：\n· 各广告的 analysis_output\n· 共性镜头prompt / 横向对比\n（视频切片保留）\n\n不可恢复，确定？';
+    delReq={project_id:proj(),ad_id:null,analysis_only:true,clear_jobs:false};
+  }else{
+    msg='删除任务记录 #'+id+'？';
+  }
+  if(!confirm(msg))return;
+
+  if(delReq){
     try{
       const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-        body:JSON.stringify({project_id:proj(),ad_id:ref,analysis_only:false,clear_jobs:false})});
-      const d=await r.json();logOps('✓ 已删除 R2 文件 '+d.deleted+' 个（'+ref+'）');
-    }catch(e){logOps('✗ 删除文件失败 '+e.message)}
+        body:JSON.stringify(delReq)});
+      const d=await r.json();
+      logOps(d.ok?('✓ 已删除 R2 文件 '+d.deleted+' 个（'+d.scope+'）'):('✗ 删文件失败 '+(d.detail||r.status)));
+    }catch(e){logOps('✗ 删文件失败 '+e.message)}
   }
-  loadJobs();
+  try{
+    await fetch('/jobs/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({job_id:id})});
+    logOps('✓ 已删除任务记录 #'+id);
+  }catch(e){logOps('✗ 删记录失败 '+e.message)}
+  loadJobs();loadAll();
 }
 
 async function doDelete(single,analysisOnly){
