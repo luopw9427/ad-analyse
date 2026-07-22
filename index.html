@@ -131,6 +131,7 @@
          title="服务端设置的 APP_TOKEN，用于调用接口鉴权。填一次会记住">
   <button class="eye" onclick="toggleEye('token',this)" title="显示/隐藏">👁</button>
   <button onclick="loadAll()">加载结果</button>
+  <button class="ghost" onclick="location.href='/prompts'" title="自定义各环节分析提示词（存本机浏览器）">提示词</button>
   <span id="status" class="muted"></span>
 </header>
 <main>
@@ -258,7 +259,8 @@ async function doAnalyze(){
     cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked,
     hypotheses:$('#hyp').value.trim()||null,
     openrouter_key:$('#orkey').value.trim()||null,
-    batch:batch||null};
+    batch:batch||null,
+    custom_prompts:(()=>{try{const o=JSON.parse(localStorage.getItem('customPrompts')||'{}');return Object.keys(o).length?o:null}catch(e){return null}})()};
   setStatus('提交分析…');logOps('▶ 提交分析 '+(batch?('批次 '+batch):('整个项目 '+proj()))+' …');
   let jid=null;
   try{

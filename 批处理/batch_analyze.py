@@ -21,6 +21,18 @@ Phase 2: 批处理入口
 """
 
 from __future__ import annotations
+# ── 提示词可覆盖（PROMPTS_FILE 存在时用覆盖版，否则用下方默认常量）──
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+try:
+    import prompts as _pcfg
+    def _prompt(key, default):
+        return _pcfg.pick(key, default)
+except Exception:
+    def _prompt(key, default):
+        return default
+
 import os
 import sys
 import json
@@ -354,7 +366,7 @@ def generate_cross_compare(vp_results: List[dict], root: Path, model: str) -> Op
             ],
         })
 
-    prompt_text = COMPARE_PROMPT.format(
+    prompt_text = _prompt('compare', COMPARE_PROMPT).format(
         ads_json=json.dumps(ads_data, ensure_ascii=False, indent=2),
         schema_json=json.dumps(横向对比.model_json_schema(), ensure_ascii=False, indent=2),
     )

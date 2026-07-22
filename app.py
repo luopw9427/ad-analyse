@@ -23,6 +23,7 @@ from __future__ import annotations
 import os
 import sys
 import subprocess
+import json
 import tempfile
 import shutil
 import threading
@@ -91,6 +92,7 @@ class AnalyzeReq(BaseModel):
     hypotheses: Optional[str] = None   # 前置卖点提示（可选，逗号分隔）
     openrouter_key: Optional[str] = None   # 前端传入，留空则用服务端环境变量
     batch: Optional[str] = None            # 本次批次；给了则只分析这一批
+    custom_prompts: Optional[dict] = None  # {环节key: 提示词文本}，覆盖默认
 
 
 @app.get("/")
@@ -101,6 +103,23 @@ def home():
         headers={"Cache-Control": "no-cache, no-store, must-revalidate",
                  "Pragma": "no-cache", "Expires": "0"},
     )
+
+
+@app.get("/prompts")
+def prompts_page():
+    """提示词编辑页（单页）。"""
+    return FileResponse(ROOT / "prompts.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/prompts/defaults")
+def prompts_defaults():
+    """返回 10 个环节的默认提示词 + 必需占位符（供编辑页展示/校验）。"""
+    try:
+        with open(ROOT / "prompts_defaults.json", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取默认提示词失败: {e}")
 
 
 @app.get("/health")
@@ -131,7 +150,18 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         env = os.environ.copy()
         if req.openrouter_key:
             env["OPENROUTER_API_KEY"] = req.openrouter_key
-        proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, env=env)
+        _pf = None
+        if req.custom_prompts:
+            _pf = tempfile.mktemp(prefix="prompts_", suffix=".json")
+            with open(_pf, "w", encoding="utf-8") as _f:
+                json.dump(req.custom_prompts, _f, ensure_ascii=False)
+            env["PROMPTS_FILE"] = _pf
+        try:
+            proc = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, env=env)
+        finally:
+            if _pf:
+                try: os.remove(_pf)
+                except Exception: pass
         log = (proc.stdout or "") + (proc.stderr or "")
         ok = proc.returncode == 0
         cost, tin, tout = _sum_cost_from_log(log)

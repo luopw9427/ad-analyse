@@ -14,6 +14,18 @@
 """
 
 from __future__ import annotations
+# ── 提示词可覆盖（PROMPTS_FILE 存在时用覆盖版，否则用下方默认常量）──
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+try:
+    import prompts as _pcfg
+    def _prompt(key, default):
+        return _pcfg.pick(key, default)
+except Exception:
+    def _prompt(key, default):
+        return default
+
 import os
 import base64
 import json
@@ -307,7 +319,7 @@ def analyze_shot(
         for d in (detection_results or [])
     ) or "  (无)"
 
-    prompt_text = PROMPT.format(
+    prompt_text = _prompt('shot_analysis', PROMPT).format(
         hint_block=hint_block,
         shot_id=shot_id,
         duration=duration,
@@ -625,7 +637,7 @@ def summarize_to_business_json(
             ],
         })
 
-    prompt_text = AGGREGATE_PROMPT.format(
+    prompt_text = _prompt('aggregate', AGGREGATE_PROMPT).format(
         shots_json=json.dumps(slim, ensure_ascii=False, indent=2),
         schema_json=json.dumps(广告整合.model_json_schema(), ensure_ascii=False, indent=2),
     )

@@ -17,6 +17,18 @@ Round 3: 卖点绑定      —— 找协同事件 + 从每个原子动作推卖�
 """
 
 from __future__ import annotations
+# ── 提示词可覆盖（PROMPTS_FILE 存在时用覆盖版，否则用下方默认常量）──
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent.parent))
+try:
+    import prompts as _pcfg
+    def _prompt(key, default):
+        return _pcfg.pick(key, default)
+except Exception:
+    def _prompt(key, default):
+        return default
+
 import os
 import base64
 import json
@@ -440,7 +452,7 @@ def analyze_shot(
     hint_block = build_hint_block(**(human_hint or {"product": "未知"}))
 
     # ---------- Round 1: Fine 分解 ----------
-    r1_prompt = ROUND1_PROMPT.format(
+    r1_prompt = _prompt('split_round1', ROUND1_PROMPT).format(
         hint_block=hint_block,
         shot_id=shot_id,
         duration=duration,
@@ -460,7 +472,7 @@ def analyze_shot(
     _time.sleep(1.0)
 
     # ---------- Round 2: Atomic + 四条链 ----------
-    r2_prompt = ROUND2_PROMPT.format(
+    r2_prompt = _prompt('split_round2', ROUND2_PROMPT).format(
         hint_block=hint_block,
         shot_id=shot_id,
         duration=duration,
@@ -484,7 +496,7 @@ def analyze_shot(
     _time.sleep(1.0)
 
     # ---------- Round 3: 协同 + 卖点归纳 ----------
-    r3_prompt = ROUND3_PROMPT.format(
+    r3_prompt = _prompt('split_round3', ROUND3_PROMPT).format(
         hint_block=hint_block,
         shot_id=shot_id,
         duration=duration,
@@ -703,7 +715,7 @@ def summarize_to_business_json(
             ],
         })
 
-    prompt_text = AGGREGATE_PROMPT.format(
+    prompt_text = _prompt('split_aggregate', AGGREGATE_PROMPT).format(
         shots_json=json.dumps(slim, ensure_ascii=False, indent=2),
         schema_json=json.dumps(广告整合.model_json_schema(), ensure_ascii=False, indent=2),
     )
