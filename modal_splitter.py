@@ -203,6 +203,14 @@ class Splitter:
             (out_dir / "shots.json").write_text(
                 json.dumps(shots, indent=2, ensure_ascii=False), encoding="utf-8")
 
+            # 首图：取 shot_000 第一帧，随产物一起存（下载时直接带上，不用再抽帧）
+            try:
+                first = out_dir / "shot_000.mp4"
+                if first.exists():
+                    os.system(f'ffmpeg -y -loglevel error -i "{first}" -vframes 1 "{out_dir/"首图.jpg"}"')
+            except Exception as _e:
+                print(f"[modal] 首图生成失败: {_e}")
+
             # 4. 回传 R2（out_prefix 由调用方决定，如 projects/{项目}/{批次}/{广告}/）
             prefix = out_prefix
             uploaded = 0

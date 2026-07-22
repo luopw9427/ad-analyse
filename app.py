@@ -457,15 +457,12 @@ def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str
     work = Path(tempfile.mkdtemp(prefix="dl_"))
     localdir = work / ad_id
     localdir.mkdir(parents=True, exist_ok=True)
-    first_mp4 = None
     for k in keys:
         name = k[len(prefix):]
         if not name:
             continue
         dst = localdir / name
         r2.download_file(k, dst)
-        if name.endswith("shot_000.mp4") and first_mp4 is None:
-            first_mp4 = dst
 
     # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
     if ad_id:
@@ -476,17 +473,7 @@ def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str
         except Exception:
             pass
 
-    # 首图：取 shot_000 第一帧（best-effort，需要 ffmpeg）
-    if first_mp4 and first_mp4.exists():
-        try:
-            import static_ffmpeg
-            static_ffmpeg.add_paths()
-            subprocess.run(
-                f'ffmpeg -y -loglevel error -i "{first_mp4}" -vframes 1 "{localdir/"首图.jpg"}"',
-                shell=True, timeout=60)
-        except Exception as e:
-            print(f"[download] 首图生成失败: {e}")
-
+    # 首图：直接用 shot_000.mp4 作为封面参考（不再服务端抽帧，避免 ffmpeg 卡住导致 502）
     zip_path = work / f"{dl_name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for fp in localdir.rglob("*"):

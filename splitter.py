@@ -183,4 +183,12 @@ def split_video(video_path: str, out_dir: str, precise: bool = True,
                    f'-i "{video_path}" -c copy "{out}"')
         os.system(cmd)
 
+    # 首图：取 shot_000 第一帧（ffmpeg 已在 PATH），随产物一起上传
+    try:
+        first = out_dir / "shot_000.mp4"
+        if first.exists():
+            os.system(f'ffmpeg -y -loglevel error -i "{first}" -vframes 1 "{out_dir/"首图.jpg"}"')
+    except Exception as _e:
+        print(f"[split] 首图生成失败: {_e}")
+
     return shots
