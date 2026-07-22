@@ -32,6 +32,8 @@ from typing import Optional
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
+import zipfile
 from pydantic import BaseModel
 
 import r2_storage as r2
@@ -314,6 +316,61 @@ def delete(req: DeleteReq, x_api_token: str = Header(default="")):
 
 class JobDeleteReq(BaseModel):
     job_id: int
+
+
+@app.get("/download")
+def download(project_id: str, ad_id: str, x_api_token: str = Header(default="")):
+    """打包某广告的全部产物为 zip：切片、shots.json、卖点(ad_aggregate)、
+    脚本/镜头 prompt、项目级共性 prompt、以及首图(shot_000 第一帧)。"""
+    _check_token(x_api_token)
+    import r2_storage as r2
+    prefix = f"projects/{project_id}/{ad_id}/"
+    keys = r2.list_keys(prefix)
+    if not keys:
+        raise HTTPException(status_code=404, detail="该广告没有文件")
+
+    work = Path(tempfile.mkdtemp(prefix="dl_"))
+    localdir = work / ad_id
+    localdir.mkdir(parents=True, exist_ok=True)
+    first_mp4 = None
+    for k in keys:
+        name = k[len(prefix):]
+        if not name:
+            continue
+        dst = localdir / name
+        r2.download_file(k, dst)
+        if name == "shot_000.mp4":
+            first_mp4 = dst
+
+    # 项目级共性 prompt（best-effort）
+    try:
+        r2.download_file(f"projects/{project_id}/共性镜头prompt.json",
+                         localdir / "共性镜头prompt.json")
+    except Exception:
+        pass
+
+    # 首图：取 shot_000 第一帧（best-effort，需要 ffmpeg）
+    if first_mp4 and first_mp4.exists():
+        try:
+            import static_ffmpeg
+            static_ffmpeg.add_paths()
+            subprocess.run(
+                f'ffmpeg -y -loglevel error -i "{first_mp4}" -vframes 1 "{localdir/"首图.jpg"}"',
+                shell=True, timeout=60)
+        except Exception as e:
+            print(f"[download] 首图生成失败: {e}")
+
+    zip_path = work / f"{ad_id}.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+        for fp in localdir.rglob("*"):
+            if fp.is_file():
+                z.write(fp, fp.relative_to(localdir))
+
+    return FileResponse(
+        zip_path, media_type="application/zip",
+        filename=f"{project_id}_{ad_id}.zip",
+        background=BackgroundTask(shutil.rmtree, str(work), ignore_errors=True),
+    )
 
 
 @app.post("/jobs/delete")
