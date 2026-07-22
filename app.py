@@ -90,6 +90,7 @@ class AnalyzeReq(BaseModel):
     cross_compare: bool = False
     hypotheses: Optional[str] = None   # 前置卖点提示（可选，逗号分隔）
     openrouter_key: Optional[str] = None   # 前端传入，留空则用服务端环境变量
+    batch: Optional[str] = None            # 本次批次；给了则只分析这一批
 
 
 @app.get("/")
@@ -121,6 +122,9 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         cmd.append("--cross-compare")
     if req.hypotheses:
         cmd += ["--hypotheses", req.hypotheses]
+    if req.batch:
+        cmd += ["--batch", req.batch]
+    _prefix = f"projects/{req.project_id}/" + (f"{req.batch}/" if req.batch else "")
 
     t0 = time.time()
     try:
@@ -131,7 +135,7 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         log = (proc.stdout or "") + (proc.stderr or "")
         ok = proc.returncode == 0
         cost, tin, tout = _sum_cost_from_log(log)
-        db.finish_job(job_id, ok, f"projects/{req.project_id}/",
+        db.finish_job(job_id, ok, _prefix,
                       (f"LLM 调用 {tin}+{tout} tokens" if ok else log[-800:]),
                       time.time() - t0,
                       cost_usd=cost, tokens_in=tin, tokens_out=tout, cost_exact=True)
@@ -143,31 +147,31 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
 def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
     _check_token(x_api_token)
-    job_id = db.start_job("analyze", req.project_id, "", product=req.product)
+    job_id = db.start_job("analyze", req.project_id, req.batch or "", product=req.product, batch=req.batch or "")
     threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
     return {
-        "ok": True,
-        "started": True,
-        "job_id": job_id,
-        "r2_prefix": f"projects/{req.project_id}/",
+        "ok": True, "started": True, "job_id": job_id,
+        "r2_prefix": f"projects/{req.project_id}/" + (f"{req.batch}/" if req.batch else ""),
         "note": "分析已在后台开始，查任务记录看进度",
     }
 
 
-def _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw):
+def _split_via_gpu(project_id, batch, ad, video_path_str, precise, keep_raw):
     """GPU 路径：原视频存 R2 → 调 Modal → Modal 直接把切片写回 R2。"""
     import requests
     import r2_storage as r2
     if not MODAL_SPLIT_URL or not MODAL_SPLIT_TOKEN:
         raise RuntimeError("未配置 MODAL_SPLIT_URL / MODAL_SPLIT_TOKEN")
 
-    raw_key = f"raw/{project_id}/{ad}.mp4"
+    raw_key = f"raw/{project_id}/{batch}/{ad}.mp4"
+    out_prefix = f"projects/{project_id}/{batch}/{ad}/"
     r2.upload_file(raw_key, video_path_str)
     try:
         resp = requests.post(
             MODAL_SPLIT_URL,
             json={"token": MODAL_SPLIT_TOKEN, "project_id": project_id,
-                  "ad_id": ad, "raw_key": raw_key, "precise": precise},
+                  "ad_id": ad, "raw_key": raw_key, "out_prefix": out_prefix,
+                  "precise": precise},
             timeout=1800,
         )
         data = resp.json()
@@ -184,14 +188,14 @@ def _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw):
     return data
 
 
-def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
+def _run_split_bg(project_id, batch, ad, video_path_str, work_str, precise, job_id,
                   engine="cpu", keep_raw=False):
     """后台线程：按引擎拆分 → 切片写回 R2 → 更新任务状态。"""
     import r2_storage as r2
     t0 = time.time()
     try:
         if engine == "gpu":
-            data = _split_via_gpu(project_id, ad, video_path_str, precise, keep_raw)
+            data = _split_via_gpu(project_id, batch, ad, video_path_str, precise, keep_raw)
             n = data.get("n_shots", 0)
             elapsed = float(data.get("elapsed") or 0)
             billed = float(data.get("billed_seconds") or 0)
@@ -211,8 +215,8 @@ def _run_split_bg(project_id, ad, video_path_str, work_str, precise, job_id,
                 shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
             for fp in sorted(out_dir.iterdir()):
                 if fp.is_file():
-                    r2.upload_file(f"projects/{project_id}/{ad}/{fp.name}", str(fp))
-            db.finish_job(job_id, True, f"projects/{project_id}/{ad}/",
+                    r2.upload_file(f"projects/{project_id}/{batch}/{ad}/{fp.name}", str(fp))
+            db.finish_job(job_id, True, f"projects/{project_id}/{batch}/{ad}/",
                           f"{len(shots)} shots (CPU·含Railway订阅)", time.time() - t0,
                           cost_usd=0.0, cost_exact=True)
     except Exception as e:
@@ -227,6 +231,7 @@ def split(project_id: str = Form(...),
           precise: bool = Form(default=True),
           engine: str = Form(default="cpu"),        # cpu / gpu
           keep_raw: bool = Form(default=False),     # GPU 路径是否保留原视频
+          batch: str = Form(default=""),            # 本次上传批次 id
           file: UploadFile = File(...),
           x_api_token: str = Header(default="")):
     """异步：先存上传文件，立即返回 job_id，后台拆分+回传，前端轮询 /jobs。"""
@@ -237,12 +242,13 @@ def split(project_id: str = Form(...),
     with open(video_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     engine = (engine or "cpu").lower()
-    job_id = db.start_job("split", project_id, ad, engine=engine)
+    batch = batch or time.strftime("%Y%m%d-%H%M%S")
+    job_id = db.start_job("split", project_id, ad, engine=engine, batch=batch)
     threading.Thread(target=_run_split_bg,
-                     args=(project_id, ad, str(video_path), str(work), precise,
+                     args=(project_id, batch, ad, str(video_path), str(work), precise,
                            job_id, engine, keep_raw),
                      daemon=True).start()
-    return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad, "engine": engine}
+    return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad, "engine": engine, "batch": batch}
 
 
 @app.get("/result")
@@ -283,6 +289,7 @@ def jobs(limit: int = 50, x_api_token: str = Header(default="")):
 class DeleteReq(BaseModel):
     project_id: str
     ad_id: Optional[str] = None        # 指定则只删该广告
+    batch: Optional[str] = None        # 指定批次；配合 ad_id 删批次内单条，单独给删整批
     analysis_only: bool = False        # 只删分析产物，保留切片
     clear_jobs: bool = False           # 同时清理该项目的任务记录
 
@@ -294,28 +301,35 @@ def delete(req: DeleteReq, x_api_token: str = Header(default="")):
     if not req.project_id:
         raise HTTPException(status_code=400, detail="缺少 project_id")
 
+    pid = req.project_id
+    bseg = f"{req.batch}/" if req.batch else ""   # 批次层
     if req.analysis_only:
-        # 只删分析产物：各广告的 analysis_output/ + 项目级汇总文件
-        prefix = f"projects/{req.project_id}/"
-        keys = [k for k in r2.list_keys(prefix)
+        # 只删分析产物：analysis_output/ + 共性/横向（限定批次/广告）
+        base = f"projects/{pid}/{bseg}"
+        keys = [k for k in r2.list_keys(base)
                 if "/analysis_output" in k or k.endswith("共性镜头prompt.json")
                 or k.endswith("横向对比.md")]
         if req.ad_id:
-            keys = [k for k in keys if k.startswith(f"{prefix}{req.ad_id}/")]
+            keys = [k for k in keys if k.startswith(f"{base}{req.ad_id}/")]
         deleted = r2.delete_keys(keys)
-        scope = f"{req.project_id}/{req.ad_id or ''} 的分析产物"
+        scope = f"{base}{req.ad_id or ''} 的分析产物"
     elif req.ad_id:
-        # 删单条广告：切片+分析产物 + 该广告的原视频 raw/
-        deleted = r2.delete_prefix(f"projects/{req.project_id}/{req.ad_id}/")
-        deleted += r2.delete_keys(r2.list_keys(f"raw/{req.project_id}/{req.ad_id}.mp4"))
-        scope = f"projects/{req.project_id}/{req.ad_id}/ (含原视频)"
+        # 删单条广告：切片+分析产物 + 该广告的原视频 raw/（批次内）
+        deleted = r2.delete_prefix(f"projects/{pid}/{bseg}{req.ad_id}/")
+        deleted += r2.delete_keys(r2.list_keys(f"raw/{pid}/{bseg}{req.ad_id}.mp4"))
+        scope = f"projects/{pid}/{bseg}{req.ad_id}/ (含原视频)"
+    elif req.batch:
+        # 删整批：该批次下 projects/ 与 raw/ 全清
+        deleted = r2.delete_prefix(f"projects/{pid}/{req.batch}/")
+        deleted += r2.delete_prefix(f"raw/{pid}/{req.batch}/")
+        scope = f"批次 {req.batch}（projects/ + raw/）"
     else:
         # 删整个项目：projects/ 与 raw/ 全清，绝不留残留
-        deleted = r2.delete_prefix(f"projects/{req.project_id}/")
-        deleted += r2.delete_prefix(f"raw/{req.project_id}/")
-        scope = f"projects/{req.project_id}/ + raw/{req.project_id}/"
+        deleted = r2.delete_prefix(f"projects/{pid}/")
+        deleted += r2.delete_prefix(f"raw/{pid}/")
+        scope = f"projects/{pid}/ + raw/{pid}/"
 
-    jobs_deleted = db.delete_jobs(req.project_id) if req.clear_jobs else 0
+    jobs_deleted = db.delete_jobs(req.project_id, req.batch or "") if req.clear_jobs else 0
     return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}
 
 
@@ -324,12 +338,12 @@ class JobDeleteReq(BaseModel):
 
 
 @app.get("/download")
-def download(project_id: str, ad_id: str, x_api_token: str = Header(default="")):
+def download(project_id: str, ad_id: str, batch: str = "", x_api_token: str = Header(default="")):
     """打包某广告的全部产物为 zip：切片、shots.json、卖点(ad_aggregate)、
     脚本/镜头 prompt、项目级共性 prompt、以及首图(shot_000 第一帧)。"""
     _check_token(x_api_token)
     import r2_storage as r2
-    prefix = f"projects/{project_id}/{ad_id}/"
+    prefix = f"projects/{project_id}/{batch}/{ad_id}/" if batch else f"projects/{project_id}/{ad_id}/"
     keys = r2.list_keys(prefix)
     if not keys:
         raise HTTPException(status_code=404, detail="该广告没有文件")
@@ -349,8 +363,9 @@ def download(project_id: str, ad_id: str, x_api_token: str = Header(default=""))
 
     # 项目级共性 prompt（best-effort）
     try:
-        r2.download_file(f"projects/{project_id}/共性镜头prompt.json",
-                         localdir / "共性镜头prompt.json")
+        common_key = (f"projects/{project_id}/{batch}/共性镜头prompt.json" if batch
+                      else f"projects/{project_id}/共性镜头prompt.json")
+        r2.download_file(common_key, localdir / "共性镜头prompt.json")
     except Exception:
         pass
 

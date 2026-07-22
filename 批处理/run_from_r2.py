@@ -38,9 +38,8 @@ BATCH_ANALYZE = Path(__file__).resolve().parent / "batch_analyze.py"
 SKIP_UPLOAD_SUFFIXES = (".mp4", ".mov", ".mkv", ".avi", ".webm")
 
 
-def sync_down(project_id: str, dest_root: Path) -> list[str]:
-    """把 R2 projects/{project_id}/ 下所有对象拉到本地 dest_root，保持 ad_id/文件名 结构。"""
-    prefix = f"projects/{project_id}/"
+def sync_down(prefix: str, dest_root: Path) -> list[str]:
+    """把 R2 prefix 下所有对象拉到本地 dest_root，保持 ad_id/文件名 结构。"""
     keys = r2.list_keys(prefix)
     if not keys:
         raise RuntimeError(f"R2 上 {prefix} 没有任何对象，先在 Colab 跑拆分并上传")
@@ -59,9 +58,9 @@ def sync_down(project_id: str, dest_root: Path) -> list[str]:
     return sorted(ads)
 
 
-def sync_up(project_id: str, src_root: Path) -> int:
-    """把本地分析产物写回 R2（跳过 mp4 等拆分素材）。"""
-    prefix = f"projects/{project_id}"
+def sync_up(prefix: str, src_root: Path) -> int:
+    """把本地分析产物写回 R2 prefix 下（跳过 mp4 等拆分素材）。"""
+    prefix = prefix.rstrip("/")
     n = 0
     for p in src_root.rglob("*"):
         if not p.is_file():
@@ -79,6 +78,7 @@ def main():
     ap = argparse.ArgumentParser(description="从 R2 驱动的批量分析")
     ap.add_argument("--project", required=True, help="PROJECT_ID（与 Colab 上传时一致）")
     ap.add_argument("--product", required=True, help="产品名（透传给 batch_analyze）")
+    ap.add_argument("--batch", default="", help="批次 id（本次上传）。给了则只处理 projects/{项目}/{批次}/")
     ap.add_argument("--workdir", default=None, help="本地临时工作目录（默认系统临时目录）")
     ap.add_argument("--keep", action="store_true", help="跑完保留本地临时目录（默认删除）")
     ap.add_argument("--dry-run", action="store_true",
@@ -87,25 +87,27 @@ def main():
                     help="跳过拉取与分析，只把 --workdir 里已有的产物补传回 R2（回传中断后用）")
     # 其余未知参数原样透传给 batch_analyze
     args, passthrough = ap.parse_known_args()
+    R2_PREFIX = f"projects/{args.project}/" + (f"{args.batch}/" if args.batch else "")
+    SCOPE = args.batch or args.project
 
     # 断点补传：只回传，不重新分析、不重新花钱
     if args.resume_upload:
         if not args.workdir:
             print("[错误] --resume-upload 需要配合 --workdir 指定之前保留的目录")
             sys.exit(1)
-        root = Path(args.workdir) / args.project
+        root = Path(args.workdir) / SCOPE
         if not root.is_dir():
             print(f"[错误] 找不到 {root}")
             sys.exit(1)
-        sync_up(args.project, root)
-        print(f"\nOK 补传完成。R2 前缀：projects/{args.project}/")
+        sync_up(R2_PREFIX, root)
+        print(f"\nOK 补传完成。R2 前缀：{R2_PREFIX}")
         return
 
     # 连通性自检：只拉取、不分析、不回传
     if args.dry_run:
         check_root = Path(tempfile.mkdtemp(prefix=f"r2check_{args.project}_"))
         try:
-            ads = sync_down(args.project, check_root / args.project)
+            ads = sync_down(R2_PREFIX, check_root / SCOPE)
             print(f"\nOK R2 拉取正常，共 {len(ads)} 条广告可分析。加 --dry-run 之外的参数即可正式跑。")
         finally:
             import shutil
@@ -121,13 +123,13 @@ def main():
         work = Path(tempfile.mkdtemp(prefix=f"r2_{args.project}_"))
         cleanup = not args.keep
 
-    root = work / args.project
+    root = work / SCOPE
     root.mkdir(parents=True, exist_ok=True)
 
     ok = False
     try:
         # 1. 拉取
-        sync_down(args.project, root)
+        sync_down(R2_PREFIX, root)
 
         # 2. 调 batch_analyze
         cmd = [sys.executable, str(BATCH_ANALYZE), str(root),
@@ -138,9 +140,9 @@ def main():
             print(f"[警告] batch_analyze 返回码 {proc.returncode}，仍尝试回传已生成的产物")
 
         # 3. 回传
-        sync_up(args.project, root)
+        sync_up(R2_PREFIX, root)
         ok = True
-        print(f"\nOK 完成。R2 前缀：projects/{args.project}/")
+        print(f"\nOK 完成。R2 前缀：{R2_PREFIX}")
     finally:
         # 只有全部成功才清理；失败时保留本地产物，避免白跑一次分析
         if ok and cleanup:
@@ -151,7 +153,7 @@ def main():
             print(f"[保留] 本地产物在：{root}")
             if not ok:
                 print(f"      回传未完成。修好网络后可只补传：")
-                print(f"      python 批处理/run_from_r2.py --project {args.project} "
+                print(f"      python 批处理/run_from_r2.py --project {args.project} --batch {args.batch} "
                       f"--product \"{args.product}\" --resume-upload --workdir \"{work}\"")
 
 

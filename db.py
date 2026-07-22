@@ -50,6 +50,7 @@ def init_db():
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tokens_in INTEGER DEFAULT 0")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS tokens_out INTEGER DEFAULT 0")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cost_exact BOOLEAN DEFAULT true")
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch TEXT")
         print("[db] jobs 表就绪")
         # 服务重启说明之前的 running 任务已随进程消失，标记为中断，避免永远挂着
         with _conn() as c:
@@ -63,16 +64,16 @@ def init_db():
         print(f"[db] init 失败: {e}")
 
 
-def start_job(kind: str, project_id: str, ref: str, engine: str = "", product: str = ""):
+def start_job(kind: str, project_id: str, ref: str, engine: str = "", product: str = "", batch: str = ""):
     """创建一条 running 任务，返回 id（供后台完成时更新）。"""
     if not enabled():
         return None
     try:
         with _conn() as c:
             cur = c.execute(
-                "INSERT INTO jobs (kind, project_id, ref, status, ok, engine, product)"
-                " VALUES (%s,%s,%s,'running',NULL,%s,%s) RETURNING id",
-                (kind, project_id, ref, engine, product),
+                "INSERT INTO jobs (kind, project_id, ref, status, ok, engine, product, batch)"
+                " VALUES (%s,%s,%s,'running',NULL,%s,%s,%s) RETURNING id",
+                (kind, project_id, ref, engine, product, batch),
             )
             return cur.fetchone()[0]
     except Exception as e:
@@ -131,13 +132,15 @@ def delete_job(job_id: int) -> int:
         return 0
 
 
-def delete_jobs(project_id: str = "") -> int:
-    """删除任务记录：给了 project_id 只删该项目，否则清空。"""
+def delete_jobs(project_id: str = "", batch: str = "") -> int:
+    """删除任务记录：给了 batch 只删该批次；给了 project_id 删该项目；都没给清空。"""
     if not enabled():
         return 0
     try:
         with _conn() as c:
-            if project_id:
+            if project_id and batch:
+                cur = c.execute("DELETE FROM jobs WHERE project_id=%s AND batch=%s", (project_id, batch))
+            elif project_id:
                 cur = c.execute("DELETE FROM jobs WHERE project_id=%s", (project_id,))
             else:
                 cur = c.execute("DELETE FROM jobs")
@@ -153,12 +156,12 @@ def recent(limit: int = 50):
     try:
         with _conn() as c:
             rows = c.execute(
-                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product, cost_usd, tokens_in, tokens_out, cost_exact"
+                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product, cost_usd, tokens_in, tokens_out, cost_exact, batch"
                 " FROM jobs ORDER BY id DESC LIMIT %s", (limit,)
             ).fetchall()
         cols = ["id", "kind", "project_id", "ref", "status", "ok",
                 "r2_prefix", "duration_sec", "created_at", "detail", "engine", "product",
-                "cost_usd", "tokens_in", "tokens_out", "cost_exact"]
+                "cost_usd", "tokens_in", "tokens_out", "cost_exact", "batch"]
         out = []
         for r in rows:
             d = dict(zip(cols, r))

@@ -63,8 +63,8 @@
     border-radius:20px;padding:4px 12px;font-size:12px;font-weight:500}
   .tag.pain{background:var(--pain-bg);border-color:#f2d3c3;color:var(--pain)}
 
-  .shots{display:flex;flex-wrap:wrap;gap:12px}
-  .shots video{width:172px;border-radius:10px;background:#000;border:1px solid var(--line-2);box-shadow:var(--sh-sm)}
+  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .shots video{width:100%;height:auto;border-radius:8px;background:#000;border:1px solid var(--line-2);box-shadow:var(--sh-sm)}
 
   .prompt{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
     padding:12px 12px;margin:7px 0;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#2c3644}
@@ -90,8 +90,13 @@
     white-space:pre-wrap;color:#3a4557;font-family:"SFMono-Regular",Consolas,monospace}
 
   details{margin-top:8px}
-  summary{cursor:pointer;color:var(--accent);font-weight:500}
-  summary:hover{color:var(--accent-ink)}
+  details>summary{cursor:pointer;color:var(--sub);font-weight:600;font-size:12.5px;
+    list-style:none;user-select:none;padding:3px 0}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:"▸";color:var(--accent);margin-right:7px;font-size:11px}
+  details[open]>summary::before{content:"▾"}
+  details>summary:hover{color:var(--accent)}
+  summary.ad-sum{font-size:14px;color:var(--ink);padding:2px 0 8px}
   #drawerTab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:54;
     background:var(--accent);color:#fff;writing-mode:vertical-rl;letter-spacing:3px;
     padding:16px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;
@@ -140,7 +145,7 @@
     </div>
     <div class="row">
       <b>② 分析：</b>
-      <button id="btnAnalyze" onclick="doAnalyze()">开始分析本项目</button>
+      <button id="btnAnalyze" onclick="doAnalyze()">开始分析本批次</button>
       <label class="ck"><input type="checkbox" id="cc"> 生成横向对比</label>
       <label class="ck"><input type="checkbox" id="pro"> 用更强模型(Pro,贵)</label>
       <label class="ck"><input type="checkbox" id="ow"> 强制重跑</label>
@@ -164,9 +169,9 @@
       <button class="ghost" onclick="clearJobs()">清空本项目任务记录</button>
     </div>
     <div class="row">
-      <span class="muted">删除单条广告：</span>
-      <input id="delAd" placeholder="广告名，如 海马" size="14">
-      <button class="ghost" onclick="doDelete(true,false)">删除该广告</button>
+      <span class="muted">删除批次：</span>
+      <input id="delBatch" placeholder="批次 id，如 20260722-153012" size="20">
+      <button class="ghost" onclick="doDeleteBatch()">删除该批次</button>
     </div>
   </div>
 
@@ -220,11 +225,13 @@ async function doSplit(){
   if(!files.length){alert('先选视频文件');return}
   if(!tok()){alert('先填访问口令');return}
   $('#btnSplit').disabled=true;
+  const batch=newBatchId();_curBatch=batch;localStorage.setItem('curBatch',batch);
+  logOps('▶ 本次批次：'+batch+'（'+files.length+' 个视频，共性镜头只在本批次内归纳）');
   for(let i=0;i<files.length;i++){
     const f=files[i];
     setStatus(`拆分 ${i+1}/${files.length}: ${f.name}（后台运行）…`);
     logOps('▶ 提交拆分 '+f.name+'（'+$('#engine').value.toUpperCase()+'）…');
-    const fd=new FormData();fd.append('project_id',proj());
+    const fd=new FormData();fd.append('project_id',proj());fd.append('batch',batch);
     fd.append('ad_id',f.name.replace(/\.[^.]+$/,''));fd.append('precise',$('#fast').checked?'false':'true');fd.append('engine',$('#engine').value);fd.append('keep_raw',$('#keepraw').checked?'true':'false');fd.append('file',f);
     try{
       const r=await fetch('/split',{method:'POST',headers:headers(),body:fd});
@@ -234,17 +241,20 @@ async function doSplit(){
       logOps((job.ok?'✓':'✗')+' 拆分 '+f.name+(job.ok?`  ${(job.detail||'').replace(' shots','')} 个镜头`:'  失败: '+(job.detail||'')));
     }catch(e){logOps('✗ 拆分 '+f.name+'  '+e.message)}
   }
-  setStatus('拆分完成');$('#btnSplit').disabled=false;loadJobs();
+  setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
 }
 
 async function doAnalyze(){
   remember();if(!tok()){alert('先填访问口令');return}
   $('#btnAnalyze').disabled=true;
+  const batch=_curBatch||localStorage.getItem('curBatch')||'';
+  if(!batch){ if(!confirm('本次没有先上传拆分，未指定批次。\n确定分析整个项目（会把项目内所有批次一起归纳共性）？'))return; }
   const body={project_id:proj(),product:$('#product').value.trim()||'产品',
     cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked,
     hypotheses:$('#hyp').value.trim()||null,
-    openrouter_key:$('#orkey').value.trim()||null};
-  setStatus('提交分析…');logOps('▶ 提交分析项目 '+proj()+' …');
+    openrouter_key:$('#orkey').value.trim()||null,
+    batch:batch||null};
+  setStatus('提交分析…');logOps('▶ 提交分析 '+(batch?('批次 '+batch):('整个项目 '+proj()))+' …');
   let jid=null;
   try{
     const r=await fetch('/analyze',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -275,42 +285,42 @@ function promptBlock(t){const d=document.createElement('div');d.className='promp
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
 
 let _jobLimit=8;          // 任务列表默认显示条数
+let _curBatch=localStorage.getItem('curBatch')||'';   // 本次上传批次
+function newBatchId(){const d=new Date(),z=n=>String(n).padStart(2,'0');
+  return ''+d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes())+z(d.getSeconds());}
 let _res=null;            // 缓存 /result 解析结果 {ads,common,vids,count}
 let _resLimit=5;          // 结果卡片默认展示条数
 
-async function viewJob(kind,ref,detail,status){
+async function viewJob(kind,ref,batch,detail,status){
   if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail);return}
   await ensureResult();
   if(!_res)return;
-  if(kind==='analyze'||!ref){ renderDrawer(); openDrawer(); return; }  // 分析：右栏看全部
-  showSingle(ref);                                                     // 拆分：主区看这一条
+  if(kind==='analyze'){ showBatch(batch||ref); return; }   // 分析：主区看这一批（全部广告+共性）
+  showSingle(batch, ref);                                   // 拆分：主区看这一条
 }
 
-async function delJob(id,kind,ref){
+async function delJob(id,kind,ref,batch){
   if(!tok()){alert('先填访问口令');return}
   let msg,delReq=null;
   if(kind==='split'&&ref){
-    msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将一并删除广告「'+ref+'」在 R2 的全部文件：\n· 镜头切片\n· 该广告的分析产物\n\n不可恢复，确定？';
-    delReq={project_id:proj(),ad_id:ref,analysis_only:false,clear_jobs:false};
+    msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将删除该广告在 R2 的全部文件（切片+分析产物+原视频），不可恢复。确定？';
+    delReq={project_id:proj(),batch:batch||null,ad_id:ref,analysis_only:false,clear_jobs:false};
   }else if(kind==='analyze'){
-    msg='删除任务 #'+id+'（分析 '+ref+'）\n\n分析是整个项目级的，将删除项目「'+proj()+'」在 R2 的全部文件：\n· 所有广告的镜头切片\n· 所有分析产物 / 共性 prompt / 横向对比\n\n不可恢复，确定？';
-    delReq={project_id:proj(),ad_id:null,analysis_only:false,clear_jobs:false};
+    msg='删除任务 #'+id+'（分析批次 '+(batch||ref)+'）\n\n将删除该批次在 R2 的全部文件（所有广告切片+分析产物+共性+原视频）及该批次任务记录，不可恢复。确定？';
+    delReq={project_id:proj(),batch:(batch||ref)||null,ad_id:null,analysis_only:false,clear_jobs:true};
   }else{
     msg='删除任务记录 #'+id+'？';
   }
   if(!confirm(msg))return;
-
   if(delReq){
     try{
-      const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-        body:JSON.stringify(delReq)});
+      const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(delReq)});
       const d=await r.json();
-      logOps(d.ok?('✓ 已删除 R2 文件 '+d.deleted+' 个（'+d.scope+'）'):('✗ 删文件失败 '+(d.detail||r.status)));
+      logOps(d.ok?('✓ 已删除 R2 文件 '+d.deleted+' 个（'+d.scope+'）'+(d.jobs_deleted?('，任务记录 '+d.jobs_deleted+' 条'):'')):('✗ 删文件失败 '+(d.detail||r.status)));
     }catch(e){logOps('✗ 删文件失败 '+e.message)}
   }
   try{
-    await fetch('/jobs/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-      body:JSON.stringify({job_id:id})});
+    await fetch('/jobs/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({job_id:id})});
     logOps('✓ 已删除任务记录 #'+id);
   }catch(e){logOps('✗ 删记录失败 '+e.message)}
   loadJobs();loadAll();
@@ -325,6 +335,18 @@ async function doDelete(single,analysisOnly){
   try{
     const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
       body:JSON.stringify({project_id:proj(),ad_id:ad||null,analysis_only:analysisOnly,clear_jobs:(!single&&!analysisOnly)})});
+    const d=await r.json();
+    logOps(d.ok?('✓ 已删除 '+d.deleted+' 个对象（'+d.scope+'）'+(d.jobs_deleted?('，任务记录 '+d.jobs_deleted+' 条'):'')):('✗ 删除失败 '+(d.detail||r.status)));
+    loadJobs();loadAll();
+  }catch(e){logOps('✗ 删除失败 '+e.message)}
+}
+async function doDeleteBatch(){
+  remember();if(!tok()){alert('先填访问口令');return}
+  const b=$('#delBatch').value.trim();if(!b){alert('先填批次 id');return}
+  if(!confirm('删除批次 '+b+' 的全部文件（切片+分析产物+共性+原视频）及该批次任务记录？不可恢复。'))return;
+  try{
+    const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({project_id:proj(),batch:b,ad_id:null,analysis_only:false,clear_jobs:true})});
     const d=await r.json();
     logOps(d.ok?('✓ 已删除 '+d.deleted+' 个对象（'+d.scope+'）'+(d.jobs_deleted?('，任务记录 '+d.jobs_deleted+' 条'):'')):('✗ 删除失败 '+(d.detail||r.status)));
     loadJobs();loadAll();
@@ -350,8 +372,8 @@ async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
-    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
-    d.jobs.slice(0,_jobLimit).forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
+    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
+    d.jobs.slice(0,_jobLimit).forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -375,7 +397,15 @@ async function loadAll(){
   $('#results').innerHTML='<div class="muted" style="padding:6px">点任务列表某条的「查看」在此显示其详情；把鼠标移到屏幕最右侧可查看全部结果。</div>';
 }
 
-// 拉取并解析 /result，缓存到 _res（懒加载，viewJob 会复用）
+// 拉取并解析 /result，按「批次」分组缓存到 _res
+function parseKey(k,pid){
+  const rest=k.slice(('projects/'+pid+'/').length);
+  const parts=rest.split('/');
+  if(parts.length<2)return null;
+  // projects/{pid}/{batch}/共性镜头prompt.json → depth2, ad=null
+  // projects/{pid}/{batch}/{ad}/... → depth>=3
+  return {batch:parts[0], ad:(parts.length>=3?parts[1]:null), last:parts[parts.length-1]};
+}
 async function ensureResult(force){
   if(_res&&!force)return _res;
   let data;try{data=await api('/result?project_id='+encodeURIComponent(proj()))}
@@ -383,107 +413,142 @@ async function ensureResult(force){
     if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该项目不存在或暂无产物</div>';renderDrawer();}
     else setStatus('加载失败：'+e.message);
     return null;}
-  const pid=proj();const ads={};let common=null;
+  const pid=proj();const batches={};
+  const B=b=>batches[b]||(batches[b]={ads:{},vids:{},common:null});
   for(const [k,v] of Object.entries(data.reports||{})){
-    if(k.endsWith('共性镜头prompt.json')){common=v;continue}
-    const ad=adFromKey(k,pid);if(!ad)continue;ads[ad]=ads[ad]||{};
-    if(k.endsWith('ad_aggregate.json'))ads[ad].agg=v;
-    else if(k.endsWith('video_prompt.json'))ads[ad].vp=v;
-    else if(k.endsWith('shot_prompts.json'))ads[ad].sp=v;
+    const info=parseKey(k,pid);if(!info)continue;
+    if(k.endsWith('共性镜头prompt.json')&&info.ad===null){B(info.batch).common=v;continue}
+    if(!info.ad)continue;
+    const bo=B(info.batch);const A=bo.ads[info.ad]||(bo.ads[info.ad]={});
+    if(k.endsWith('ad_aggregate.json'))A.agg=v;
+    else if(k.endsWith('video_prompt.json'))A.vp=v;
+    else if(k.endsWith('shot_prompts.json'))A.sp=v;
   }
-  const vids={};(data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const ad=adFromKey(o.key,pid);if(ad)(vids[ad]=vids[ad]||[]).push(o.url)}});
-  Object.keys(vids).forEach(ad=>{if(!ads[ad])ads[ad]={}});
-  _res={ads,common,vids,count:data.count};
-  setStatus('共 '+data.count+' 个对象 · '+Object.keys(ads).length+' 条广告');
+  (data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const info=parseKey(o.key,pid);if(info&&info.ad){const bo=B(info.batch);if(!bo.ads[info.ad])bo.ads[info.ad]={};(bo.vids[info.ad]=bo.vids[info.ad]||[]).push(o.url)}}});
+  _res={batches,count:data.count};
+  setStatus('共 '+data.count+' 个对象 · '+Object.keys(batches).length+' 个批次');
   return _res;
 }
 
-// 右侧抽屉：按顺序展示全部广告的详细结果（拆分+分析）
+// 右侧抽屉：按批次分组展示全部结果
+function drawerAll(open){document.querySelectorAll('#drawer details').forEach(d=>d.open=open)}
 function renderDrawer(){
-  const dr=$('#drawer');dr.innerHTML='<h2 style="margin:0 0 14px">全部结果</h2>';
+  const dr=$('#drawer');
+  dr.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+    +'<h2 style="margin:0">全部结果</h2>'
+    +'<div><button class="mini" onclick="drawerAll(true)">全部展开</button>'
+    +'<button class="mini" onclick="drawerAll(false)">全部收起</button></div></div>';
   if(!_res){dr.innerHTML+='<div class="muted">点顶部「加载结果」加载</div>';return}
-  const names=Object.keys(_res.ads);
-  if(!names.length){dr.innerHTML+='<div class="muted">该项目暂无广告</div>';return}
-  names.forEach(ad=>dr.appendChild(drawerCard(ad)));
-  if(_res.common)dr.appendChild(renderCommon(_res.common));
+  const bs=Object.keys(_res.batches).sort().reverse();  // 新批次在上
+  if(!bs.length){dr.innerHTML+='<div class="muted">该项目暂无批次</div>';return}
+  bs.forEach(b=>dr.appendChild(drawerBatch(b)));
 }
-function drawerCard(ad){
-  const d=_res.ads[ad]||{},agg=d.agg||{},vp=d.vp||{};
-  const videos=(_res.vids[ad]||[]).slice().sort();
+function drawerBatch(batch){
+  const bo=_res.batches[batch];const nAds=Object.keys(bo.ads).length;
   const c=document.createElement('div');c.className='card';
-  const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px';
-  head.innerHTML='<b style="font-size:14px">'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'
+  const det=document.createElement('details');det.open=true;
+  const sm=document.createElement('summary');sm.className='ad-sum';
+  sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')+'</span>';
+  det.appendChild(sm);
+  Object.keys(bo.ads).forEach(ad=>det.appendChild(adBlock(batch,ad)));
+  if(bo.common)det.appendChild(renderCommon(bo.common));
+  c.appendChild(det);return c;
+}
+function adBlock(batch,ad){
+  const bo=_res.batches[batch],d=bo.ads[ad]||{},agg=d.agg||{},vp=d.vp||{};
+  const videos=(bo.vids[ad]||[]).slice().sort();
+  const c=document.createElement('div');c.style.cssText='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;position:relative';
+  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇ 下载';dl.style.cssText='position:absolute;top:12px;right:14px;z-index:1';dl.onclick=()=>downloadAd(batch,ad);c.appendChild(dl);
+  const det=document.createElement('details');det.open=true;
+  const sm=document.createElement('summary');sm.className='ad-sum';
+  sm.innerHTML='<b>'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'
     +(agg.total_duration?(' · '+agg.total_duration+'s'):'')
     +(vp.广告结构分类&&vp.广告结构分类.主结构?(' · '+vp.广告结构分类.主结构):(agg.广告主张?'':' · 仅拆分'))+'</span>';
-  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇';dl.title='打包下载';dl.onclick=()=>downloadAd(ad);head.appendChild(dl);
-  c.appendChild(head);c.appendChild(renderAdDetail(ad,d,videos));
-  return c;
+  det.appendChild(sm);det.appendChild(renderAdDetail(ad,d,videos));
+  c.appendChild(det);return c;
 }
 
-// 主区只在点某条「查看」时显示这一条详情
-function showSingle(ad){
+// 主区：点分析任务查看整批；点拆分任务查看单条
+function showBatch(batch){
   const root=$('#results');root.innerHTML='';
-  if(!_res||_res.ads[ad]===undefined){root.innerHTML='<div class="muted" style="padding:6px">该广告已删除或不存在</div>';return}
-  const d=_res.ads[ad]||{},agg=d.agg||{};
-  const videos=(_res.vids[ad]||[]).slice().sort();
-  const c=document.createElement('div');c.className='card';
-  const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px';
-  head.innerHTML='<div><b style="font-size:15px">'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'+(agg.total_duration?(' · '+agg.total_duration+'s'):'')+'</span></div>';
-  const btns=document.createElement('div');
-  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇ 下载全部';dl.onclick=()=>downloadAd(ad);
-  const cl=document.createElement('button');cl.className='mini';cl.textContent='关闭';
-  cl.onclick=()=>{root.innerHTML='<div class="muted" style="padding:6px">点任务列表某条的「查看」在此显示其详情；把鼠标移到屏幕最右侧可查看全部结果。</div>'};
-  btns.appendChild(dl);btns.appendChild(cl);head.appendChild(btns);
-  c.appendChild(head);c.appendChild(renderAdDetail(ad,d,videos));
-  root.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'start'});
+  if(!_res||!_res.batches[batch]){root.innerHTML='<div class="muted" style="padding:6px">该批次已删除或不存在</div>';return}
+  root.appendChild(drawerBatch(batch));
+  if(root.firstChild)root.firstChild.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function showSingle(batch,ad){
+  const root=$('#results');root.innerHTML='';
+  const bo=_res&&_res.batches[batch];
+  if(!bo||bo.ads[ad]===undefined){root.innerHTML='<div class="muted" style="padding:6px">该广告已删除或不存在</div>';return}
+  root.appendChild(adBlock(batch,ad));
+  if(root.firstChild)root.firstChild.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
-// 抽屉开合：鼠标移到最右侧标签展开，离开抽屉收起
+// 抽屉开合
 function openDrawer(){$('#drawer').classList.add('open')}
 function closeDrawer(){$('#drawer').classList.remove('open')}
 function toggleDrawer(){$('#drawer').classList.toggle('open')}
 function wireDrawer(){
-  const tab=$('#drawerTab'),dr=$('#drawer');
-  if(!tab||!dr)return;
+  const tab=$('#drawerTab'),dr=$('#drawer');if(!tab||!dr)return;
   tab.addEventListener('mouseenter',openDrawer);
   dr.addEventListener('mouseleave',closeDrawer);
 }
 
 // 打包下载该广告全部产物
-async function downloadAd(ad){
+async function downloadAd(batch,ad){
   if(!tok()){alert('先填访问口令');return}
   setStatus('打包下载 '+ad+' …');logOps('▶ 打包下载 '+ad+' …');
   try{
-    const r=await fetch('/download?project_id='+encodeURIComponent(proj())+'&ad_id='+encodeURIComponent(ad),{headers:headers()});
+    const q='/download?project_id='+encodeURIComponent(proj())+'&ad_id='+encodeURIComponent(ad)+(batch?('&batch='+encodeURIComponent(batch)):'');
+    const r=await fetch(q,{headers:headers()});
     if(!r.ok){logOps('✗ 下载失败 '+r.status);setStatus('下载失败');return}
     const blob=await r.blob();const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=proj()+'_'+ad+'.zip';
+    const a=document.createElement('a');a.href=url;a.download=proj()+'_'+(batch?batch+'_':'')+ad+'.zip';
     document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
     logOps('✓ 已下载 '+ad+'.zip');setStatus('');
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
 }
 
-// 详情内容（卡片展开后才渲染）
+// 详情内容（每个片段可单独收起）
+function promptItem(it){
+  const d=document.createElement('details');
+  const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');d.appendChild(sm);
+  d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
+  return d;
+}
 function renderAdDetail(ad,d,videos){
   const frag=document.createDocumentFragment();const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
-  if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';frag.appendChild(p)}
-  if(agg.广告主张){const p=document.createElement('div');p.innerHTML='<b>主张：</b>'+agg.广告主张;frag.appendChild(p)}
-  if(videos.length){const h=document.createElement('h3');h.textContent='镜头切片';frag.appendChild(h);const w=document.createElement('div');w.className='shots';videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;v.preload='metadata';w.appendChild(v)});frag.appendChild(w)}
+  if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';frag.appendChild(p)}
+  if(agg.广告主张){const p=document.createElement('div');p.style.margin='6px 0';p.innerHTML='<b>主张：</b>'+agg.广告主张;frag.appendChild(p)}
+  if(videos.length){
+    const det=document.createElement('details');det.open=true;
+    const sm=document.createElement('summary');sm.textContent='镜头切片（'+videos.length+'）';det.appendChild(sm);
+    const w=document.createElement('div');w.className='shots';w.style.marginTop='6px';
+    videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;v.preload='metadata';w.appendChild(v)});
+    det.appendChild(w);frag.appendChild(det);
+  }
   if(agg.商品卖点){const h=document.createElement('h3');h.textContent='卖点';frag.appendChild(h);frag.appendChild(tags(agg.商品卖点))}
   if(agg.解决痛点){const h=document.createElement('h3');h.textContent='痛点';frag.appendChild(h);frag.appendChild(tags(agg.解决痛点,'pain'))}
-  if(vp.video_prompt_text){const h=document.createElement('h3');h.textContent='视频级脚本 prompt';frag.appendChild(h);frag.appendChild(promptBlock(vp.video_prompt_text))}
+  if(vp.video_prompt_text){
+    const det=document.createElement('details');det.open=true;
+    const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';det.appendChild(sm);
+    det.appendChild(promptBlock(vp.video_prompt_text));frag.appendChild(det);
+  }
   const list=(sp.镜头级prompt列表||[]);
-  if(list.length){const h=document.createElement('h3');h.textContent='镜头 prompt 素材（'+list.length+' 条）';frag.appendChild(h);const det=document.createElement('details');det.innerHTML='<summary>展开查看</summary>';list.forEach(it=>{const t=document.createElement('div');t.style.marginTop='8px';t.innerHTML='<b>'+(it.标题||it.id||'')+'</b>';det.appendChild(t);det.appendChild(tags(it.卖点));det.appendChild(promptBlock(it.prompt||''))});frag.appendChild(det)}
+  if(list.length){
+    const det=document.createElement('details');
+    const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条）';det.appendChild(sm);
+    list.forEach(it=>det.appendChild(promptItem(it)));
+    frag.appendChild(det);
+  }
   return frag;
 }
 
 function renderCommon(v){
   const c=document.createElement('div');c.className='card';
-  c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+((v.共性镜头prompt列表||[]).length)+' 条）</span></h2>';
+  const list=v.共性镜头prompt列表||[];
+  c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 跨全部广告归纳）</span></h2>';
   if(v.商品共性卖点)c.appendChild(tags(v.商品共性卖点));
-  const det=document.createElement('details');det.innerHTML='<summary>展开查看 '+((v.共性镜头prompt列表||[]).length)+' 条共性 prompt</summary>';
-  (v.共性镜头prompt列表||[]).forEach(it=>{const t=document.createElement('div');t.style.marginTop='10px';t.innerHTML='<b>'+(it.标题||it.id||'')+'</b>';det.appendChild(t);det.appendChild(tags(it.卖点));det.appendChild(promptBlock(it.prompt||''))});
-  c.appendChild(det);
+  list.forEach(it=>c.appendChild(promptItem(it)));
   return c;
 }
 

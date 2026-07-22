@@ -152,6 +152,7 @@ class Splitter:
         project_id = item["project_id"]
         ad_id = item["ad_id"]
         raw_key = item["raw_key"]
+        out_prefix = item.get("out_prefix") or f"projects/{project_id}/{ad_id}/"
         precise = bool(item.get("precise", False))
         bucket = os.environ["R2_BUCKET_NAME"]
 
@@ -202,8 +203,8 @@ class Splitter:
             (out_dir / "shots.json").write_text(
                 json.dumps(shots, indent=2, ensure_ascii=False), encoding="utf-8")
 
-            # 4. 回传 R2
-            prefix = f"projects/{project_id}/{ad_id}/"
+            # 4. 回传 R2（out_prefix 由调用方决定，如 projects/{项目}/{批次}/{广告}/）
+            prefix = out_prefix
             uploaded = 0
             for fp in sorted(out_dir.iterdir()):
                 ctype = "video/mp4" if fp.suffix == ".mp4" else "application/json"
