@@ -5,42 +5,93 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>视频广告分析</title>
 <style>
-  :root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--txt:#e6e8ec;--sub:#9aa0ab;--acc:#7f77dd;--ok:#4ecb8d;--warn:#e0995f}
+  :root{
+    --bg:#eef2f8; --panel:#ffffff; --panel-2:#f7f9fc;
+    --ink:#1b2431; --ink-2:#57617340; --sub:#5a6678; --muted:#9aa6b6;
+    --line:#e7ecf3; --line-2:#dde4ee;
+    --accent:#2f6bed; --accent-ink:#1e51c4; --accent-weak:#eaf1fe;
+    --ok:#15a34a; --ok-bg:#e9f7ee; --warn:#c26a12; --warn-bg:#fbf1e2;
+    --run:#5a52d8; --run-bg:#eeecfb; --pain:#c0561f; --pain-bg:#fbeee4;
+    --r:14px; --r-sm:9px;
+    --sh:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.05);
+    --sh-sm:0 1px 2px rgba(16,24,40,.05);
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
-  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;position:sticky;top:0;background:var(--bg);z-index:5}
-  header h1{font-size:16px;margin:0 8px 0 0}
-  input,select{background:var(--card);border:1px solid var(--line);color:var(--txt);padding:7px 10px;border-radius:6px;font-size:13px}
-  button{background:var(--acc);border:0;color:#fff;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  button.ghost{background:transparent;border:1px solid var(--line);color:var(--sub)}
-  main{padding:20px 24px;max-width:1100px;margin:0 auto}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin-bottom:16px}
-  .card h2{font-size:15px;margin:0 0 12px}
-  .card h3{font-size:13px;color:var(--sub);margin:14px 0 6px;font-weight:600}
-  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
-  label.ck{color:var(--sub);display:flex;gap:5px;align-items:center;font-size:13px}
-  .tags{display:flex;flex-wrap:wrap;gap:6px}
-  .tag{background:#22262f;border:1px solid var(--line);border-radius:20px;padding:3px 10px;font-size:12px}
-  .tag.pain{border-color:var(--warn);color:var(--warn)}
-  .shots{display:flex;flex-wrap:wrap;gap:10px}
-  .shots video{width:180px;border-radius:6px;background:#000;border:1px solid var(--line)}
-  .prompt{position:relative;background:#12141a;border:1px solid var(--line);border-radius:6px;padding:10px;margin:6px 0;white-space:pre-wrap;font-size:12.5px;line-height:1.5;color:#cdd2da}
-  .copy{position:absolute;top:6px;right:6px;padding:2px 8px;font-size:11px;background:#2a2f3a}
-  .muted{color:var(--sub)}
+  body{margin:0;background:linear-gradient(180deg,#eef2f8,#e9eef6);color:var(--ink);
+       font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+
+  header{padding:14px 28px;background:rgba(255,255,255,.85);backdrop-filter:blur(10px);
+         border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+         position:sticky;top:0;z-index:10;box-shadow:0 1px 0 rgba(16,24,40,.02)}
+  header h1{font-size:16px;margin:0 14px 0 0;font-weight:700;letter-spacing:.2px;
+            background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  header .muted{font-size:12px;color:var(--sub)}
+
+  input,select{background:#fff;border:1px solid var(--line-2);color:var(--ink);
+    padding:8px 11px;border-radius:var(--r-sm);font-size:13px;outline:none;transition:.15s}
+  input::placeholder{color:var(--muted)}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+
+  button{background:var(--accent);border:0;color:#fff;padding:8px 16px;border-radius:var(--r-sm);
+    cursor:pointer;font-size:13px;font-weight:600;transition:.15s;box-shadow:var(--sh-sm)}
+  button:hover{background:var(--accent-ink)}
+  button:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
+  button.ghost{background:#fff;border:1px solid var(--line-2);color:var(--sub);font-weight:500;box-shadow:none}
+  button.ghost:hover{background:var(--panel-2);border-color:var(--accent);color:var(--accent)}
+  button.eye{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:6px 9px;font-size:13px;box-shadow:none}
+  button.eye:hover{background:var(--panel-2)}
+  button.mini{padding:3px 10px;font-size:11.5px;background:var(--panel-2);color:var(--sub);
+    border:1px solid var(--line-2);margin-right:5px;font-weight:500;box-shadow:none}
+  button.mini:hover{background:var(--accent-weak);border-color:var(--accent);color:var(--accent)}
+  button.mini.del{background:#fff;border-color:#f0c9bb;color:var(--pain)}
+  button.mini.del:hover{background:var(--pain-bg)}
+
+  main{padding:24px 28px 60px;max-width:1120px;margin:0 auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+    padding:20px 22px;margin-bottom:18px;box-shadow:var(--sh)}
+  .card h2{font-size:15px;margin:0 0 14px;font-weight:700;display:flex;align-items:center;gap:9px}
+  .card h2::before{content:"";width:4px;height:15px;border-radius:3px;
+    background:linear-gradient(180deg,#2f6bed,#5a52d8);display:inline-block}
+  .card h3{font-size:12px;color:var(--sub);margin:16px 0 7px;font-weight:600;letter-spacing:.3px;text-transform:none}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0}
+  .row>b{color:var(--ink);font-weight:600}
+  label.ck{color:var(--sub);display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer}
+  label.ck input{accent-color:var(--accent)}
+
+  .tags{display:flex;flex-wrap:wrap;gap:7px}
+  .tag{background:var(--accent-weak);border:1px solid #d7e4fd;color:var(--accent-ink);
+    border-radius:20px;padding:4px 12px;font-size:12px;font-weight:500}
+  .tag.pain{background:var(--pain-bg);border-color:#f2d3c3;color:var(--pain)}
+
+  .shots{display:flex;flex-wrap:wrap;gap:12px}
+  .shots video{width:172px;border-radius:10px;background:#000;border:1px solid var(--line-2);box-shadow:var(--sh-sm)}
+
+  .prompt{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+    padding:12px 12px;margin:7px 0;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#2c3644}
+  .copy{position:absolute;top:7px;right:7px;padding:3px 9px;font-size:11px;background:#fff;
+    border:1px solid var(--line-2);color:var(--sub);box-shadow:none}
+  .copy:hover{background:var(--accent-weak);color:var(--accent)}
+  .muted{color:var(--muted)}
+
   table{width:100%;border-collapse:collapse;font-size:12.5px}
-  th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
-  th{color:var(--sub);font-weight:600}
-  .badge{padding:1px 8px;border-radius:10px;font-size:11px}
-  .badge.done{background:rgba(78,203,141,.15);color:var(--ok)}
-  .badge.error{background:rgba(224,153,95,.15);color:var(--warn)}
-  .badge.run{background:rgba(127,119,221,.18);color:#a9a2ee}
-  button.eye{background:transparent;border:1px solid var(--line);padding:5px 8px;font-size:13px}
-  button.mini{padding:2px 8px;font-size:11px;background:#2a2f3a;margin-right:4px}
-  button.mini.del{background:transparent;border:1px solid var(--warn);color:var(--warn)}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  thead th,tr:first-child th{color:var(--sub);font-weight:600;background:var(--panel-2);
+    border-bottom:1px solid var(--line-2)}
+  tbody tr:hover,table tr:hover{background:var(--panel-2)}
   td.ops{white-space:nowrap}
-  #ops .log{background:#12141a;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin-top:8px;font-size:12px;max-height:160px;overflow:auto;white-space:pre-wrap;color:#cdd2da}
-  details{margin-top:8px}summary{cursor:pointer;color:var(--sub)}
+
+  .badge{padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600}
+  .badge.done{background:var(--ok-bg);color:var(--ok)}
+  .badge.error{background:var(--pain-bg);color:var(--pain)}
+  .badge.run{background:var(--run-bg);color:var(--run)}
+
+  #ops .log,#opslog{background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
+    padding:10px 12px;margin-top:10px;font-size:12px;max-height:170px;overflow:auto;
+    white-space:pre-wrap;color:#3a4557;font-family:"SFMono-Regular",Consolas,monospace}
+
+  details{margin-top:8px}
+  summary{cursor:pointer;color:var(--accent);font-weight:500}
+  summary:hover{color:var(--accent-ink)}
 </style>
 </head>
 <body>
