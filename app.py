@@ -28,7 +28,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
@@ -230,6 +230,69 @@ def _run_split_bg(project_id, batch, ad, video_path_str, work_str, precise, job_
         db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
     finally:
         shutil.rmtree(work_str, ignore_errors=True)
+
+
+def _split_one(project_id, batch, ad, video_path_str, work_str, engine, precise, keep_raw):
+    """拆一个视频，返回 (镜头数, 成本)。"""
+    import r2_storage as r2
+    if engine == "gpu":
+        data = _split_via_gpu(project_id, batch, ad, video_path_str, precise, keep_raw)
+        n = data.get("n_shots", 0)
+        billed = float(data.get("billed_seconds") or 0)
+        cold = bool(data.get("cold_start"))
+        billed_total = billed + (MODAL_COLD_START_SEC if cold else 0.0)
+        return n, billed_total * MODAL_RATE_USD_PER_SEC * MODAL_COST_MULTIPLIER
+    import splitter
+    with _SPLIT_LOCK:
+        out_dir = Path(work_str) / ad
+        shots = splitter.split_video(video_path_str, str(out_dir), precise=precise)
+    for fp in sorted(out_dir.iterdir()):
+        if fp.is_file():
+            r2.upload_file(f"projects/{project_id}/{batch}/{ad}/{fp.name}", str(fp))
+    return len(shots), 0.0
+
+
+def _run_split_batch_bg(project_id, batch, items, work_str, engine, precise, keep_raw, job_id):
+    """一个批次一个后台任务：依次拆每个视频，汇总成败/成本。"""
+    t0 = time.time(); okn = 0; total_shots = 0; total_cost = 0.0; fails = []
+    for ad, vpath in items:
+        try:
+            n, cost = _split_one(project_id, batch, ad, vpath, work_str, engine, precise, keep_raw)
+            okn += 1; total_shots += n; total_cost += cost
+        except Exception as e:
+            fails.append(f"{ad}({type(e).__name__})")
+    detail = f"{okn}/{len(items)} 视频 · {total_shots} 镜头"
+    if fails:
+        detail += " · 失败: " + "; ".join(fails[:5])
+    db.finish_job(job_id, len(fails) == 0, f"projects/{project_id}/{batch}/",
+                  detail, time.time() - t0, cost_usd=total_cost, cost_exact=(engine != "gpu"))
+    shutil.rmtree(work_str, ignore_errors=True)
+
+
+@app.post("/split_batch")
+def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
+                engine: str = Form(default="cpu"), precise: bool = Form(default=True),
+                keep_raw: bool = Form(default=False),
+                files: List[UploadFile] = File(...),
+                x_api_token: str = Header(default="")):
+    """本次上传的多个视频 = 一个批次 = 一条任务。"""
+    _check_token(x_api_token)
+    batch = batch or time.strftime("%Y%m%d-%H%M%S")
+    engine = (engine or "cpu").lower()
+    work = Path(tempfile.mkdtemp(prefix="splitb_"))
+    items = []
+    for f in files:
+        ad = Path(f.filename or "ad").stem
+        vp = work / (f.filename or (ad + ".mp4"))
+        with open(vp, "wb") as out:
+            shutil.copyfileobj(f.file, out)
+        items.append((ad, str(vp)))
+    ref = "、".join(a for a, _ in items)[:60]
+    job_id = db.start_job("split", project_id, ref, engine=engine, batch=batch)
+    threading.Thread(target=_run_split_batch_bg,
+                     args=(project_id, batch, items, str(work), engine, precise, keep_raw, job_id),
+                     daemon=True).start()
+    return {"ok": True, "started": True, "job_id": job_id, "batch": batch, "n": len(items)}
 
 
 @app.post("/split")

@@ -144,7 +144,15 @@ def delete_jobs(project_id: str = "", batch: str = "") -> int:
                 cur = c.execute("DELETE FROM jobs WHERE project_id=%s", (project_id,))
             else:
                 cur = c.execute("DELETE FROM jobs")
-            return cur.rowcount
+            n = cur.rowcount
+            # 若整表已空，重置自增 id 从 1 开始
+            left = c.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
+            if left == 0:
+                try:
+                    c.execute("ALTER SEQUENCE jobs_id_seq RESTART WITH 1")
+                except Exception:
+                    pass
+            return n
     except Exception as e:
         print(f"[db] delete_jobs 失败: {e}")
         return 0
