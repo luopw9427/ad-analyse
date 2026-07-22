@@ -304,11 +304,16 @@ def delete(req: DeleteReq, x_api_token: str = Header(default="")):
             keys = [k for k in keys if k.startswith(f"{prefix}{req.ad_id}/")]
         deleted = r2.delete_keys(keys)
         scope = f"{req.project_id}/{req.ad_id or ''} 的分析产物"
+    elif req.ad_id:
+        # 删单条广告：切片+分析产物 + 该广告的原视频 raw/
+        deleted = r2.delete_prefix(f"projects/{req.project_id}/{req.ad_id}/")
+        deleted += r2.delete_keys(r2.list_keys(f"raw/{req.project_id}/{req.ad_id}.mp4"))
+        scope = f"projects/{req.project_id}/{req.ad_id}/ (含原视频)"
     else:
-        prefix = (f"projects/{req.project_id}/{req.ad_id}/"
-                  if req.ad_id else f"projects/{req.project_id}/")
-        deleted = r2.delete_prefix(prefix)
-        scope = prefix
+        # 删整个项目：projects/ 与 raw/ 全清，绝不留残留
+        deleted = r2.delete_prefix(f"projects/{req.project_id}/")
+        deleted += r2.delete_prefix(f"raw/{req.project_id}/")
+        scope = f"projects/{req.project_id}/ + raw/{req.project_id}/"
 
     jobs_deleted = db.delete_jobs(req.project_id) if req.clear_jobs else 0
     return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}

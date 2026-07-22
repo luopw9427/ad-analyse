@@ -92,6 +92,17 @@
   details{margin-top:8px}
   summary{cursor:pointer;color:var(--accent);font-weight:500}
   summary:hover{color:var(--accent-ink)}
+  #drawerTab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:54;
+    background:var(--accent);color:#fff;writing-mode:vertical-rl;letter-spacing:3px;
+    padding:16px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;
+    box-shadow:-3px 0 10px rgba(16,24,40,.15);user-select:none}
+  #drawerTab:hover{background:var(--accent-ink)}
+  #drawer{position:fixed;top:0;right:0;height:100vh;width:min(560px,46vw);z-index:55;
+    background:var(--panel);border-left:1px solid var(--line);
+    box-shadow:-12px 0 36px rgba(16,24,40,.12);overflow-y:auto;padding:22px 22px 60px;
+    transform:translateX(100%);transition:transform .28s ease}
+  #drawer.open{transform:translateX(0)}
+  #drawer .card{box-shadow:none;border:1px solid var(--line);padding:14px 16px;margin-bottom:14px}
 </style>
 </head>
 <body>
@@ -154,7 +165,7 @@
     </div>
     <div class="row">
       <span class="muted">删除单条广告：</span>
-      <input id="delAd" placeholder="广告 id，如 海马" size="14">
+      <input id="delAd" placeholder="广告名，如 海马" size="14">
       <button class="ghost" onclick="doDelete(true,false)">删除该广告</button>
     </div>
   </div>
@@ -166,6 +177,8 @@
   <div id="results"></div>
 </main>
 
+<div id="drawerTab" onclick="toggleDrawer()">全部结果 ‹</div>
+<div id="drawer"></div>
 <script>
 const $=s=>document.querySelector(s);
 const proj=()=>$('#project').value.trim();
@@ -178,6 +191,7 @@ $('#project').value=localStorage.getItem('proj')||'test';
 $('#product').value=localStorage.getItem('prod')||'';
 $('#hyp').value=localStorage.getItem('hyp')||'';
 $('#engine').value=localStorage.getItem('eng')||'gpu';
+wireDrawer();
 $('#orkey').value=localStorage.getItem('ork')||'';
 function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim())}
 
@@ -266,8 +280,10 @@ let _resLimit=5;          // 结果卡片默认展示条数
 
 async function viewJob(kind,ref,detail,status){
   if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail);return}
-  if(ref){ await expandAd(ref); }         // 定位并展开这一条广告
-  else { await ensureResult(true); renderResults(); }   // 分析任务：刷新结果列表
+  await ensureResult();
+  if(!_res)return;
+  if(kind==='analyze'||!ref){ renderDrawer(); openDrawer(); return; }  // 分析：右栏看全部
+  showSingle(ref);                                                     // 拆分：主区看这一条
 }
 
 async function delJob(id,kind,ref){
@@ -303,15 +319,15 @@ async function delJob(id,kind,ref){
 async function doDelete(single,analysisOnly){
   remember();if(!tok()){alert('先填访问口令');return}
   const ad=single?$('#delAd').value.trim():'';
-  if(single&&!ad){alert('先填要删除的广告 id');return}
+  if(single&&!ad){alert('先填要删除的广告名');return}
   const what=analysisOnly?'分析产物':(single?('广告 '+ad+' 的全部文件'):('整个项目 '+proj()+' 的全部文件'));
   if(!confirm('确定删除 '+what+' ？此操作不可恢复。'))return;
   try{
     const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
-      body:JSON.stringify({project_id:proj(),ad_id:ad||null,analysis_only:analysisOnly,clear_jobs:false})});
+      body:JSON.stringify({project_id:proj(),ad_id:ad||null,analysis_only:analysisOnly,clear_jobs:(!single&&!analysisOnly)})});
     const d=await r.json();
-    logOps(d.ok?('✓ 已删除 '+d.deleted+' 个对象（'+d.scope+'）'):('✗ 删除失败 '+(d.detail||r.status)));
-    loadAll();
+    logOps(d.ok?('✓ 已删除 '+d.deleted+' 个对象（'+d.scope+'）'+(d.jobs_deleted?('，任务记录 '+d.jobs_deleted+' 条'):'')):('✗ 删除失败 '+(d.detail||r.status)));
+    loadJobs();loadAll();
   }catch(e){logOps('✗ 删除失败 '+e.message)}
 }
 async function clearJobs(){
@@ -353,16 +369,20 @@ function adFromKey(k,pid){const rest=k.replace('projects/'+pid+'/','');const p=r
 
 async function loadAll(){
   remember();setStatus('加载中…');await loadJobs();
-  _res=null;_resLimit=5;
+  _res=null;
   await ensureResult(true);
-  renderResults();
+  renderDrawer();
+  $('#results').innerHTML='<div class="muted" style="padding:6px">点任务列表某条的「查看」在此显示其详情；把鼠标移到屏幕最右侧可查看全部结果。</div>';
 }
 
 // 拉取并解析 /result，缓存到 _res（懒加载，viewJob 会复用）
 async function ensureResult(force){
   if(_res&&!force)return _res;
   let data;try{data=await api('/result?project_id='+encodeURIComponent(proj()))}
-  catch(e){setStatus('加载失败：'+e.message);return null}
+  catch(e){_res=null;
+    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该项目不存在或暂无产物</div>';renderDrawer();}
+    else setStatus('加载失败：'+e.message);
+    return null;}
   const pid=proj();const ads={};let common=null;
   for(const [k,v] of Object.entries(data.reports||{})){
     if(k.endsWith('共性镜头prompt.json')){common=v;continue}
@@ -378,62 +398,55 @@ async function ensureResult(force){
   return _res;
 }
 
-// 渲染结果列表：折叠卡片，默认只显示 _resLimit 条，其余「展开更多广告」
-function renderResults(){
-  const root=$('#results');root.innerHTML='';
-  if(!_res){return}
+// 右侧抽屉：按顺序展示全部广告的详细结果（拆分+分析）
+function renderDrawer(){
+  const dr=$('#drawer');dr.innerHTML='<h2 style="margin:0 0 14px">全部结果</h2>';
+  if(!_res){dr.innerHTML+='<div class="muted">点顶部「加载结果」加载</div>';return}
   const names=Object.keys(_res.ads);
-  if(!names.length){root.innerHTML='<div class="muted" style="padding:4px">该项目暂无广告，先上传拆分</div>';return}
-  names.slice(0,_resLimit).forEach(ad=>root.appendChild(buildAdCard(ad)));
-  if(names.length>_resLimit){
-    const b=document.createElement('button');b.className='ghost';
-    b.textContent='展开更多广告（还有 '+(names.length-_resLimit)+' 条）';
-    b.onclick=()=>{_resLimit+=5;renderResults()};
-    b.style.marginBottom='18px';root.appendChild(b);
-  }
-  if(_res.common)root.appendChild(renderCommon(_res.common));
+  if(!names.length){dr.innerHTML+='<div class="muted">该项目暂无广告</div>';return}
+  names.forEach(ad=>dr.appendChild(drawerCard(ad)));
+  if(_res.common)dr.appendChild(renderCommon(_res.common));
 }
-
-// 折叠卡片：默认只显示标题行，点击才展开详情（懒渲染）
-function buildAdCard(ad){
+function drawerCard(ad){
   const d=_res.ads[ad]||{},agg=d.agg||{},vp=d.vp||{};
   const videos=(_res.vids[ad]||[]).slice().sort();
-  const analyzed=!!(agg.广告主张||vp.video_prompt_text);
-  const c=document.createElement('div');c.className='card';c.id='ad-'+ad;
-  const head=document.createElement('div');
-  head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer';
-  head.innerHTML='<div><b style="font-size:15px">'+ad+'</b>'
-    +' <span class="muted" style="font-weight:400">· '+(agg.total_duration||'?')+'s · '+videos.length+' 切片 · '
-    +(analyzed?((vp.广告结构分类&&vp.广告结构分类.主结构)||'已分析'):'仅拆分')+'</span></div>';
-  const btns=document.createElement('div');btns.style.whiteSpace='nowrap';
-  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇ 下载全部';
-  dl.onclick=(e)=>{e.stopPropagation();downloadAd(ad)};
-  const tg=document.createElement('button');tg.className='mini';tg.textContent='展开 ▾';
-  btns.appendChild(dl);btns.appendChild(tg);head.appendChild(btns);
-  const body=document.createElement('div');body.style.display='none';body.style.marginTop='14px';
-  let built=false;
-  function toggle(open){
-    const willOpen=(open!==undefined)?open:(body.style.display==='none');
-    if(willOpen&&!built){body.appendChild(renderAdDetail(ad,d,videos));built=true}
-    body.style.display=willOpen?'block':'none';
-    tg.textContent=willOpen?'收起 ▴':'展开 ▾';
-  }
-  head.onclick=()=>toggle();
-  c._toggle=toggle;c.appendChild(head);c.appendChild(body);
+  const c=document.createElement('div');c.className='card';
+  const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px';
+  head.innerHTML='<b style="font-size:14px">'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'
+    +(agg.total_duration?(' · '+agg.total_duration+'s'):'')
+    +(vp.广告结构分类&&vp.广告结构分类.主结构?(' · '+vp.广告结构分类.主结构):(agg.广告主张?'':' · 仅拆分'))+'</span>';
+  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇';dl.title='打包下载';dl.onclick=()=>downloadAd(ad);head.appendChild(dl);
+  c.appendChild(head);c.appendChild(renderAdDetail(ad,d,videos));
   return c;
 }
 
-// 定位并展开某条广告（供任务列表「查看」用）——只展开这一条，不再串到别处
-async function expandAd(ad){
-  await ensureResult();
-  if(!_res){return}
-  if(_res.ads[ad]===undefined){logOps('（结果里没有「'+ad+'」这条广告，可能已删除）');return}
-  let card=document.getElementById('ad-'+ad);
-  if(!card){card=buildAdCard(ad);$('#results').prepend(card)}  // 超出显示范围则单独渲染到顶部
-  if(card._toggle)card._toggle(true);
-  card.scrollIntoView({behavior:'smooth',block:'start'});
-  card.style.outline='2px solid var(--accent)';card.style.outlineOffset='2px';
-  setTimeout(()=>{card.style.outline='';card.style.outlineOffset=''},1800);
+// 主区只在点某条「查看」时显示这一条详情
+function showSingle(ad){
+  const root=$('#results');root.innerHTML='';
+  if(!_res||_res.ads[ad]===undefined){root.innerHTML='<div class="muted" style="padding:6px">该广告已删除或不存在</div>';return}
+  const d=_res.ads[ad]||{},agg=d.agg||{};
+  const videos=(_res.vids[ad]||[]).slice().sort();
+  const c=document.createElement('div');c.className='card';
+  const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:10px';
+  head.innerHTML='<div><b style="font-size:15px">'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'+(agg.total_duration?(' · '+agg.total_duration+'s'):'')+'</span></div>';
+  const btns=document.createElement('div');
+  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇ 下载全部';dl.onclick=()=>downloadAd(ad);
+  const cl=document.createElement('button');cl.className='mini';cl.textContent='关闭';
+  cl.onclick=()=>{root.innerHTML='<div class="muted" style="padding:6px">点任务列表某条的「查看」在此显示其详情；把鼠标移到屏幕最右侧可查看全部结果。</div>'};
+  btns.appendChild(dl);btns.appendChild(cl);head.appendChild(btns);
+  c.appendChild(head);c.appendChild(renderAdDetail(ad,d,videos));
+  root.appendChild(c);c.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+// 抽屉开合：鼠标移到最右侧标签展开，离开抽屉收起
+function openDrawer(){$('#drawer').classList.add('open')}
+function closeDrawer(){$('#drawer').classList.remove('open')}
+function toggleDrawer(){$('#drawer').classList.toggle('open')}
+function wireDrawer(){
+  const tab=$('#drawerTab'),dr=$('#drawer');
+  if(!tab||!dr)return;
+  tab.addEventListener('mouseenter',openDrawer);
+  dr.addEventListener('mouseleave',closeDrawer);
 }
 
 // 打包下载该广告全部产物
