@@ -50,7 +50,7 @@ MODAL_RATE_USD_PER_SEC = float(os.environ.get("MODAL_RATE_USD_PER_SEC", "0.00018
 # 由三次实测反推：计费时长 165/275/220 秒，而执行仅 19~28 秒 → 冷启动约 180 秒。
 # 想更准就按 Modal 后台 Usage 的实际增量调这个值（不用改代码，Railway 变量即可）。
 MODAL_COLD_START_SEC = float(os.environ.get("MODAL_COLD_START_SEC", "180"))
-MODAL_COST_MULTIPLIER = float(os.environ.get("MODAL_COST_MULTIPLIER", "1.0"))
+MODAL_COST_MULTIPLIER = float(os.environ.get("MODAL_COST_MULTIPLIER", "0.25"))  # 实测校准：估算约为真实4倍
 
 import re as _re
 _COST_RE = _re.compile(r"cost=\$([0-9.]+)")
@@ -141,7 +141,7 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
 def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
     _check_token(x_api_token)
-    job_id = db.start_job("analyze", req.project_id, req.product, product=req.product)
+    job_id = db.start_job("analyze", req.project_id, "", product=req.product)
     threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
     return {
         "ok": True,
