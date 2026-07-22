@@ -227,8 +227,8 @@ async function delJob(id,kind,ref){
     msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将一并删除广告「'+ref+'」在 R2 的全部文件：\n· 镜头切片\n· 该广告的分析产物\n\n不可恢复，确定？';
     delReq={project_id:proj(),ad_id:ref,analysis_only:false,clear_jobs:false};
   }else if(kind==='analyze'){
-    msg='删除任务 #'+id+'（分析 '+ref+'）\n\n将一并删除项目「'+proj()+'」的分析产物：\n· 各广告的 analysis_output\n· 共性镜头prompt / 横向对比\n（视频切片保留）\n\n不可恢复，确定？';
-    delReq={project_id:proj(),ad_id:null,analysis_only:true,clear_jobs:false};
+    msg='删除任务 #'+id+'（分析 '+ref+'）\n\n分析是整个项目级的，将删除项目「'+proj()+'」在 R2 的全部文件：\n· 所有广告的镜头切片\n· 所有分析产物 / 共性 prompt / 横向对比\n\n不可恢复，确定？';
+    delReq={project_id:proj(),ad_id:null,analysis_only:false,clear_jobs:false};
   }else{
     msg='删除任务记录 #'+id+'？';
   }
@@ -312,14 +312,17 @@ async function loadAll(){
     else if(k.endsWith('shot_prompts.json'))ads[ad].sp=v;
   }
   const vids={};(data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const ad=adFromKey(o.key,pid);if(ad)(vids[ad]=vids[ad]||[]).push(o.url)}});
+  // 只拆分、还没分析的广告也要出卡片（至少能看切片），否则「查看」定位不到
+  Object.keys(vids).forEach(ad=>{ if(!ads[ad]) ads[ad]={}; });
   const root=$('#results');
-  for(const [ad,d] of Object.entries(ads))root.appendChild(renderAd(ad,d,vids[ad]||[]));
+  for(const [ad,d] of Object.entries(ads))root.appendChild(renderAd(ad,d,(vids[ad]||[]).sort()));
   if(common)root.appendChild(renderCommon(common));
 }
 
 function renderAd(ad,d,videos){
   const c=document.createElement('div');c.className='card';c.id='ad-'+ad;const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
   c.innerHTML=`<h2>广告：${ad} <span class="muted" style="font-weight:400">· ${agg.total_duration||'?'}s · ${(vp.广告结构分类&&vp.广告结构分类.主结构)||''}</span></h2>`;
+  if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';c.appendChild(p)}
   if(agg.广告主张){const p=document.createElement('div');p.innerHTML='<b>主张：</b>'+agg.广告主张;c.appendChild(p)}
   if(videos.length){const h=document.createElement('h3');h.textContent='镜头切片';c.appendChild(h);const w=document.createElement('div');w.className='shots';videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;w.appendChild(v)});c.appendChild(w)}
   if(agg.商品卖点){const h=document.createElement('h3');h.textContent='卖点';c.appendChild(h);c.appendChild(tags(agg.商品卖点))}
