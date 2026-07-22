@@ -135,8 +135,15 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         log = (proc.stdout or "") + (proc.stderr or "")
         ok = proc.returncode == 0
         cost, tin, tout = _sum_cost_from_log(log)
+        # 提取每条广告的成败摘要（batch_analyze 打印 "成功: X / 总计: Y" 及失败明细）
+        import re as _re2
+        m = _re2.search(r"成功:\s*(\d+)\s*/\s*总计:\s*(\d+)", log)
+        fails = _re2.findall(r"✗\s*([^\n:]+):\s*([^\n]+)", log)
+        summ = (f"{m.group(1)}/{m.group(2)} 广告成功" if m else f"LLM {tin}+{tout} tokens")
+        if fails:
+            summ += " · 失败: " + "; ".join(f"{a.strip()}({b.strip()[:40]})" for a, b in fails[:5])
         db.finish_job(job_id, ok, _prefix,
-                      (f"LLM 调用 {tin}+{tout} tokens" if ok else log[-800:]),
+                      (summ if ok else log[-800:]),
                       time.time() - t0,
                       cost_usd=cost, tokens_in=tin, tokens_out=tout, cost_exact=True)
     except Exception as e:
@@ -263,10 +270,11 @@ def result(project_id: str, include_content: bool = True,
 
     objects = [{"key": k, "url": r2.public_url(k)} for k in keys]
 
+    WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json")
     reports = {}
     if include_content:
         for k in keys:
-            if k.endswith(".json"):
+            if any(k.endswith(w) for w in WANT):
                 try:
                     reports[k] = r2.read_json(k)
                 except Exception as e:
@@ -338,15 +346,20 @@ class JobDeleteReq(BaseModel):
 
 
 @app.get("/download")
-def download(project_id: str, ad_id: str, batch: str = "", x_api_token: str = Header(default="")):
+def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str = Header(default="")):
     """打包某广告的全部产物为 zip：切片、shots.json、卖点(ad_aggregate)、
     脚本/镜头 prompt、项目级共性 prompt、以及首图(shot_000 第一帧)。"""
     _check_token(x_api_token)
     import r2_storage as r2
-    prefix = f"projects/{project_id}/{batch}/{ad_id}/" if batch else f"projects/{project_id}/{ad_id}/"
+    if ad_id:
+        prefix = f"projects/{project_id}/{batch}/{ad_id}/" if batch else f"projects/{project_id}/{ad_id}/"
+        dl_name = f"{project_id}_{batch+'_' if batch else ''}{ad_id}"
+    else:                       # 整批打包
+        prefix = f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/"
+        dl_name = f"{project_id}_{batch or 'all'}"
     keys = r2.list_keys(prefix)
     if not keys:
-        raise HTTPException(status_code=404, detail="该广告没有文件")
+        raise HTTPException(status_code=404, detail="没有文件")
 
     work = Path(tempfile.mkdtemp(prefix="dl_"))
     localdir = work / ad_id
@@ -358,16 +371,17 @@ def download(project_id: str, ad_id: str, batch: str = "", x_api_token: str = He
             continue
         dst = localdir / name
         r2.download_file(k, dst)
-        if name == "shot_000.mp4":
+        if name.endswith("shot_000.mp4") and first_mp4 is None:
             first_mp4 = dst
 
-    # 项目级共性 prompt（best-effort）
-    try:
-        common_key = (f"projects/{project_id}/{batch}/共性镜头prompt.json" if batch
-                      else f"projects/{project_id}/共性镜头prompt.json")
-        r2.download_file(common_key, localdir / "共性镜头prompt.json")
-    except Exception:
-        pass
+    # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
+    if ad_id:
+        try:
+            common_key = (f"projects/{project_id}/{batch}/共性镜头prompt.json" if batch
+                          else f"projects/{project_id}/共性镜头prompt.json")
+            r2.download_file(common_key, localdir / "共性镜头prompt.json")
+        except Exception:
+            pass
 
     # 首图：取 shot_000 第一帧（best-effort，需要 ffmpeg）
     if first_mp4 and first_mp4.exists():
@@ -380,7 +394,7 @@ def download(project_id: str, ad_id: str, batch: str = "", x_api_token: str = He
         except Exception as e:
             print(f"[download] 首图生成失败: {e}")
 
-    zip_path = work / f"{ad_id}.zip"
+    zip_path = work / f"{dl_name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
         for fp in localdir.rglob("*"):
             if fp.is_file():
@@ -388,7 +402,7 @@ def download(project_id: str, ad_id: str, batch: str = "", x_api_token: str = He
 
     return FileResponse(
         zip_path, media_type="application/zip",
-        filename=f"{project_id}_{ad_id}.zip",
+        filename=f"{dl_name}.zip",
         background=BackgroundTask(shutil.rmtree, str(work), ignore_errors=True),
     )
 

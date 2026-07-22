@@ -63,7 +63,8 @@
     border-radius:20px;padding:4px 12px;font-size:12px;font-weight:500}
   .tag.pain{background:var(--pain-bg);border-color:#f2d3c3;color:var(--pain)}
 
-  .shots{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .shots{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}
+  #drawer .shots{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
   .shots video{width:100%;height:auto;border-radius:8px;background:#000;border:1px solid var(--line-2);box-shadow:var(--sh-sm)}
 
   .prompt{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
@@ -102,11 +103,14 @@
     padding:16px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;
     box-shadow:-3px 0 10px rgba(16,24,40,.15);user-select:none}
   #drawerTab:hover{background:var(--accent-ink)}
-  #drawer{position:fixed;top:0;right:0;height:100vh;width:clamp(560px,50vw,900px);z-index:55;
+  #drawer{position:fixed;top:0;right:0;height:100vh;width:clamp(420px,44vw,1200px);z-index:55;
     background:var(--panel);border-left:1px solid var(--line);
-    box-shadow:-12px 0 36px rgba(16,24,40,.12);overflow-y:auto;padding:22px 22px 60px;
+    box-shadow:-12px 0 36px rgba(16,24,40,.12);overflow:hidden;
     transform:translateX(100%);transition:transform .28s ease}
   #drawer.open{transform:translateX(0)}
+  #drawerBody{height:100%;overflow-y:auto;padding:22px 22px 60px}
+  #drawerGrip{position:absolute;left:0;top:0;width:7px;height:100%;cursor:ew-resize;z-index:3}
+  #drawerGrip:hover{background:var(--accent-weak)}
   #drawer .card{box-shadow:none;border:1px solid var(--line);padding:14px 16px;margin-bottom:14px}
 </style>
 </head>
@@ -183,7 +187,7 @@
 </main>
 
 <div id="drawerTab" onclick="toggleDrawer()">全部结果 ‹</div>
-<div id="drawer"></div>
+<div id="drawer"><div id="drawerGrip" title="拖动调整宽度"></div><div id="drawerBody"></div></div>
 <script>
 const $=s=>document.querySelector(s);
 const proj=()=>$('#project').value.trim();
@@ -433,7 +437,7 @@ async function ensureResult(force){
 // 右侧抽屉：按批次分组展示全部结果
 function drawerAll(open){document.querySelectorAll('#drawer details').forEach(d=>d.open=open)}
 function renderDrawer(){
-  const dr=$('#drawer');
+  const dr=$('#drawerBody');
   dr.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     +'<h2 style="margin:0">全部结果</h2>'
     +'<div><button class="mini" onclick="drawerAll(true)">全部展开</button>'
@@ -443,15 +447,17 @@ function renderDrawer(){
   if(!bs.length){dr.innerHTML+='<div class="muted">该项目暂无批次</div>';return}
   bs.forEach(b=>dr.appendChild(drawerBatch(b)));
 }
-function drawerBatch(batch){
+function drawerBatch(batch,openTop){
   const bo=_res.batches[batch];const nAds=Object.keys(bo.ads).length;
-  const c=document.createElement('div');c.className='card';
-  const det=document.createElement('details');det.open=true;
+  const c=document.createElement('div');c.className='card';c.style.position='relative';
+  const dlb=document.createElement('button');dlb.className='mini';dlb.textContent='⬇ 下载整批';
+  dlb.style.cssText='position:absolute;top:14px;right:16px;z-index:1';dlb.onclick=()=>downloadBatch(batch);c.appendChild(dlb);
+  const det=document.createElement('details');det.open=!!openTop;
   const sm=document.createElement('summary');sm.className='ad-sum';
   sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')+'</span>';
   det.appendChild(sm);
   Object.keys(bo.ads).forEach(ad=>det.appendChild(adBlock(batch,ad)));
-  if(bo.common)det.appendChild(renderCommon(bo.common));
+  if(bo.common)det.appendChild(renderCommon(bo.common,batch));
   c.appendChild(det);return c;
 }
 function adBlock(batch,ad){
@@ -472,7 +478,7 @@ function adBlock(batch,ad){
 function showBatch(batch){
   const root=$('#results');root.innerHTML='';
   if(!_res||!_res.batches[batch]){root.innerHTML='<div class="muted" style="padding:6px">该批次已删除或不存在</div>';return}
-  root.appendChild(drawerBatch(batch));
+  root.appendChild(drawerBatch(batch,true));
   if(root.firstChild)root.firstChild.scrollIntoView({behavior:'smooth',block:'start'});
 }
 function showSingle(batch,ad){
@@ -484,16 +490,44 @@ function showSingle(batch,ad){
 }
 
 // 抽屉开合
+let _dragging=false;
 function openDrawer(){$('#drawer').classList.add('open')}
-function closeDrawer(){$('#drawer').classList.remove('open')}
+function closeDrawer(){if(_dragging)return;$('#drawer').classList.remove('open')}
 function toggleDrawer(){$('#drawer').classList.toggle('open')}
 function wireDrawer(){
   const tab=$('#drawerTab'),dr=$('#drawer');if(!tab||!dr)return;
   tab.addEventListener('mouseenter',openDrawer);
   dr.addEventListener('mouseleave',closeDrawer);
+  const grip=$('#drawerGrip');
+  if(grip){
+    const saved=localStorage.getItem('drawerW');if(saved)dr.style.width=saved;
+    grip.addEventListener('mousedown',e=>{_dragging=true;e.preventDefault();document.body.style.userSelect='none'});
+    window.addEventListener('mousemove',e=>{if(!_dragging)return;
+      let w=window.innerWidth-e.clientX;w=Math.max(360,Math.min(w,window.innerWidth*0.92));
+      dr.style.width=w+'px';});
+    window.addEventListener('mouseup',()=>{if(_dragging){_dragging=false;document.body.style.userSelect='';localStorage.setItem('drawerW',dr.style.width)}});
+  }
 }
 
 // 打包下载该广告全部产物
+function downloadObj(obj,filename){
+  const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);const a=document.createElement('a');
+  a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+}
+async function downloadBatch(batch){
+  if(!tok()){alert('先填访问口令');return}
+  setStatus('打包整批 '+batch+' …');logOps('▶ 打包整批 '+batch+' …');
+  try{
+    const q='/download?project_id='+encodeURIComponent(proj())+'&batch='+encodeURIComponent(batch);
+    const r=await fetch(q,{headers:headers()});
+    if(!r.ok){logOps('✗ 下载失败 '+r.status);setStatus('下载失败');return}
+    const blob=await r.blob();const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=proj()+'_'+batch+'.zip';
+    document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+    logOps('✓ 已下载整批 '+batch+'.zip');setStatus('');
+  }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
+}
 async function downloadAd(batch,ad){
   if(!tok()){alert('先填访问口令');return}
   setStatus('打包下载 '+ad+' …');logOps('▶ 打包下载 '+ad+' …');
@@ -510,7 +544,7 @@ async function downloadAd(batch,ad){
 
 // 详情内容（每个片段可单独收起）
 function promptItem(it){
-  const d=document.createElement('details');
+  const d=document.createElement('details');d.open=true;
   const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');d.appendChild(sm);
   d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
   return d;
@@ -535,7 +569,7 @@ function renderAdDetail(ad,d,videos){
   }
   const list=(sp.镜头级prompt列表||[]);
   if(list.length){
-    const det=document.createElement('details');
+    const det=document.createElement('details');det.open=true;
     const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条）';det.appendChild(sm);
     list.forEach(it=>det.appendChild(promptItem(it)));
     frag.appendChild(det);
@@ -543,10 +577,13 @@ function renderAdDetail(ad,d,videos){
   return frag;
 }
 
-function renderCommon(v){
+function renderCommon(v,batch){
   const c=document.createElement('div');c.className='card';
   const list=v.共性镜头prompt列表||[];
-  c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 跨全部广告归纳）</span></h2>';
+  c.style.position='relative';
+  c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 本批次归纳）</span></h2>';
+  const dc=document.createElement('button');dc.className='mini';dc.textContent='⬇ 下载共性(json)';
+  dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');c.appendChild(dc);
   if(v.商品共性卖点)c.appendChild(tags(v.商品共性卖点));
   list.forEach(it=>c.appendChild(promptItem(it)));
   return c;
