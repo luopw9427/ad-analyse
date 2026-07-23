@@ -16,7 +16,7 @@
     --sh:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.05);
     --sh-sm:0 1px 2px rgba(16,24,40,.05);
   }
-:root{--drawer-w:44vw}
+:root{--drawer-w:50vw}
   *{box-sizing:border-box}
   body{margin:0;background:linear-gradient(180deg,#eef2f8,#e9eef6);color:var(--ink);
        font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
@@ -133,7 +133,8 @@
   body.drawer-open #drawer{transform:translateX(0)}
   #page>main{transition:margin-right .26s ease}
   body.drawer-open #page>main{margin-right:var(--drawer-w)}
-  body.drawer-open #drawerTabs{display:none}   /* 展开时隐藏右侧标签 */
+  #drawerTabs .dtab{opacity:.7;transition:opacity .15s}
+  #drawerTabs .dtab.active{opacity:1;box-shadow:-4px 0 12px rgba(16,24,40,.25)}
   #drawerBody{height:100%;overflow-y:auto;padding:22px 22px 60px}
   #drawerGrip{position:absolute;left:0;top:0;width:7px;height:100%;cursor:ew-resize;z-index:3}
   #drawerGrip:hover{background:var(--accent-weak)}
@@ -233,8 +234,8 @@
 
 </div><!--/page-->
 <div id="drawerTabs">
-  <div class="dtab" onclick="openDrawerMode('all')">全部结果 ‹</div>
-  <div class="dtab fav" onclick="openDrawerMode('fav')">收藏 ‹</div>
+  <div class="dtab" id="dtab-all" onclick="openDrawerMode('all')">全部结果</div>
+  <div class="dtab fav" id="dtab-fav" onclick="openDrawerMode('fav')">收藏</div>
 </div>
 <div id="drawer"><div id="drawerGrip" title="拖动调整宽度"></div><button id="drawerCollapse" title="收起" onclick="closeDrawer()">›</button><div id="drawerBody"></div></div>
 <script>
@@ -400,18 +401,20 @@ async function toggleFav(kind,ref,label,meta,btn){
   document.querySelectorAll('#jobs .fav-star').forEach(s=>{if(s.dataset.ref===ref){const nb=_favSet.has(ref);s.textContent=nb?'★':'☆';s.classList.toggle('on',nb);}});
 }
 async function openDrawerMode(mode){
-  if(mode==='fav')await loadFavs();
+  await loadFavs();               // 刷新收藏态，保证 ⭐ 亮/灭正确
   _drawerMode=mode;renderDrawer();openDrawer();
 }
 async function setDrawerMode(mode){
   if(mode==='fav')await loadFavs();
-  _drawerMode=mode;renderDrawer();
+  _drawerMode=mode;renderDrawer();updEdgeTabs();
 }
 
 async function viewJob(kind,ref,batch,detail,status){
   if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail);return}
   await ensureResult();
   if(!_res)return;
+  await loadFavs();        // 刷新收藏态
+  _drawerMode='all';
   renderDrawer();          // 确保右栏内容为最新
   openDrawer();            // 展开并列侧栏（不再在主区下方展开）
   focusBatch(batch||ref);  // 定位到该任务批次并全部展开
@@ -652,6 +655,9 @@ function drawerBatch(batch,openTop){
   const det=document.createElement('details');det.open=!!openTop;det.id='dbatch-'+batch;
   const sm=document.createElement('summary');sm.className='ad-sum';
   sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')+'</span>';
+  const adNames=Object.keys(bo.ads).join('、');
+  sm.appendChild(favStar('task','task|'+proj()+'|'+batch,adNames||('批次 '+batch),
+    {project:proj(),batch:batch,jobKind:'batch',label:adNames||('批次 '+batch)}));
   det.appendChild(sm);
   Object.keys(bo.ads).forEach(ad=>det.appendChild(adBlock(batch,ad)));
   if(bo.common)det.appendChild(renderCommon(bo.common,batch));
@@ -688,14 +694,21 @@ function showSingle(batch,ad){
 
 // 抽屉开合：并列侧栏（body.drawer-open 时把 #page 往左挤，两侧自适应）
 let _dragging=false;
-function updTab(){const t=$('#drawerTab');if(t)t.textContent=document.body.classList.contains('drawer-open')?'全部结果 ›':'全部结果 ‹';}
-function openDrawer(){document.body.classList.add('drawer-open');updTab();}
+function updTab(){updEdgeTabs();}
+function updEdgeTabs(){
+  const open=document.body.classList.contains('drawer-open');
+  const a=$('#dtab-all'),f=$('#dtab-fav');
+  if(a)a.classList.toggle('active',open&&_drawerMode==='all');
+  if(f)f.classList.toggle('active',open&&_drawerMode==='fav');
+}
+function openDrawer(){
+  if(!document.body.classList.contains('drawer-open'))       // 每次打开默认拉到 50%
+    document.documentElement.style.setProperty('--drawer-w','50vw');
+  document.body.classList.add('drawer-open');updTab();
+}
 function closeDrawer(){document.body.classList.remove('drawer-open');updTab();}
-function toggleDrawer(){document.body.classList.toggle('drawer-open');updTab();}
+function toggleDrawer(){document.body.classList.contains('drawer-open')?closeDrawer():openDrawer();}
 function wireDrawer(){
-  // 标签开合由内联 onclick="toggleDrawer()" 处理，这里不重复绑定
-  const savedW=localStorage.getItem('drawerW');
-  if(savedW)document.documentElement.style.setProperty('--drawer-w',savedW);
   updTab();
   const grip=$('#drawerGrip');
   if(grip){
@@ -703,8 +716,7 @@ function wireDrawer(){
     window.addEventListener('mousemove',e=>{if(!_dragging)return;
       let w=window.innerWidth-e.clientX;w=Math.max(360,Math.min(w,window.innerWidth*0.8));
       document.documentElement.style.setProperty('--drawer-w',w+'px');});
-    window.addEventListener('mouseup',()=>{if(!_dragging)return;_dragging=false;document.body.style.userSelect='';
-      localStorage.setItem('drawerW',getComputedStyle(document.documentElement).getPropertyValue('--drawer-w').trim());});
+    window.addEventListener('mouseup',()=>{if(!_dragging)return;_dragging=false;document.body.style.userSelect='';});
   }
 }
 
