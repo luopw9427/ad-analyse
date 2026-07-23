@@ -6,10 +6,6 @@ SPECS = [
  ("shot_prompt","批处理/shot_prompt_generator.py","PROMPT","单广告镜头prompt","拆出≥N条独立单镜头prompt"),
  ("common_shot","批处理/common_shot_prompt_generator.py","PROMPT","共性镜头prompt","本批次共性≥N条通用镜头prompt"),
  ("compare","批处理/batch_analyze.py","COMPARE_PROMPT","横向对比","跨广告11维度对比报告"),
- ("split_round1","拆分流程/shot_analyzer.py","ROUND1_PROMPT","拆分·第1轮Fine","拆分流程：粗分动作"),
- ("split_round2","拆分流程/shot_analyzer.py","ROUND2_PROMPT","拆分·第2轮Atomic","拆分流程：原子动作"),
- ("split_round3","拆分流程/shot_analyzer.py","ROUND3_PROMPT","拆分·第3轮卖点","拆分流程：卖点+证据"),
- ("split_aggregate","拆分流程/shot_analyzer.py","AGGREGATE_PROMPT","拆分·广告整合","拆分流程专用整合"),
 ]
 def get_const(path, name):
     tree = ast.parse(open(path,encoding="utf-8").read())
