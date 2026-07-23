@@ -153,6 +153,13 @@
       <span class="muted">文件名会作为广告 id</span>
     </div>
     <div class="row">
+      <b style="visibility:hidden">①</b>
+      <span class="muted">或粘贴视频直链</span>
+      <input id="vurl" placeholder="https://…/xxx.mp4，一次一个" size="34">
+      <button class="ghost" onclick="addUrl()">添加到本批</button>
+      <span id="urlchips" class="tags"></span>
+    </div>
+    <div class="row">
       <b>② 分析：</b>
       <button id="btnAnalyze" onclick="doAnalyze()">开始分析本批次</button>
       <label class="ck"><input type="checkbox" id="cc"> 生成横向对比</label>
@@ -231,16 +238,18 @@ async function waitJob(jid,onTick){
 // ===== 操作 =====
 async function doSplit(){
   remember();const files=$('#files').files;
-  if(!files.length){alert('先选视频文件');return}
+  const total=files.length+_urlList.length;
+  if(!total){alert('先选视频文件或粘贴视频 URL');return}
   if(!tok()){alert('先填访问口令');return}
   $('#btnSplit').disabled=true;
   const batch=newBatchId();_curBatch=batch;localStorage.setItem('curBatch',batch);
-  logOps('▶ 本次批次：'+batch+'（'+files.length+' 个视频，合为一个任务；共性只在本批次内归纳）');
+  logOps('▶ 本次批次：'+batch+'（'+files.length+' 本地 + '+_urlList.length+' URL，合为一个任务）');
   const fd=new FormData();fd.append('project_id',proj());fd.append('batch',batch);
   fd.append('engine',$('#engine').value);fd.append('precise',$('#fast').checked?'false':'true');
   fd.append('keep_raw',$('#keepraw').checked?'true':'false');
   for(let i=0;i<files.length;i++)fd.append('files',files[i]);
-  setStatus('上传拆分中…（'+files.length+' 个视频，后台运行）');
+  if(_urlList.length)fd.append('urls',JSON.stringify(_urlList));
+  setStatus('上传拆分中…（'+total+' 个视频，后台运行）');
   try{
     const r=await fetch('/split_batch',{method:'POST',headers:headers(),body:fd});
     const d=await r.json();
@@ -249,7 +258,7 @@ async function doSplit(){
     const job=await waitJob(d.job_id);
     logOps((job.ok?'✓':'✗')+' 批次拆分：'+(job.detail||''));
   }catch(e){logOps('✗ 拆分失败 '+e.message)}
-  setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
+  _urlList=[];renderUrlChips();setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
 }
 
 async function doAnalyze(){
@@ -295,6 +304,23 @@ function tags(a,cls){const w=document.createElement('div');w.className='tags';(a
 
 let _jobLimit=8;          // 任务列表默认显示条数
 let _curBatch=localStorage.getItem('curBatch')||'';   // 本次上传批次
+let _urlList=[];
+function addUrl(){
+  const el=$('#vurl');const u=(el.value||'').trim();
+  if(!u){return}
+  if(!/^https?:\/\//i.test(u)){alert('请输入 http/https 开头的视频直链');return}
+  _urlList.push(u);el.value='';renderUrlChips();
+}
+function renderUrlChips(){
+  const box=$('#urlchips');box.innerHTML='';
+  _urlList.forEach((u,i)=>{
+    const s=document.createElement('span');s.className='tag';s.style.cursor='default';
+    s.textContent=(u.length>34?u.slice(0,34)+'…':u)+' ';
+    const x=document.createElement('a');x.href='javascript:void 0';x.textContent='✕';x.style.cssText='margin-left:4px;color:var(--pain);text-decoration:none';
+    x.onclick=()=>{_urlList.splice(i,1);renderUrlChips()};
+    s.title=u;s.appendChild(x);box.appendChild(s);
+  });
+}
 function newBatchId(){const d=new Date(),z=n=>String(n).padStart(2,'0');
   return ''+d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes())+z(d.getSeconds());}
 let _res=null;            // 缓存 /result 解析结果 {ads,common,vids,count}
@@ -442,6 +468,7 @@ async function ensureResult(force){
     if(k.endsWith('ad_aggregate.json'))A.agg=v;
     else if(k.endsWith('video_prompt.json'))A.vp=v;
     else if(k.endsWith('shot_prompts.json'))A.sp=v;
+    else if(k.endsWith('source.json'))A.source=(v&&v.url)||'';
   }
   (data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const info=parseKey(o.key,pid);if(info&&info.ad){const bo=B(info.batch);if(!bo.ads[info.ad])bo.ads[info.ad]={};(bo.vids[info.ad]=bo.vids[info.ad]||[]).push(o.url)}}});
   _res={batches,count:data.count};
@@ -566,6 +593,7 @@ function promptItem(it){
 }
 function renderAdDetail(ad,d,videos){
   const frag=document.createDocumentFragment();const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
+  if(d.source){const p=document.createElement('div');p.style.margin='4px 0';p.innerHTML='<b>原视频：</b><a href="'+d.source+'" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">'+d.source+'</a>';frag.appendChild(p)}
   if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';frag.appendChild(p)}
   if(agg.广告主张){const p=document.createElement('div');p.style.margin='6px 0';p.innerHTML='<b>主张：</b>'+agg.广告主张;frag.appendChild(p)}
   if(videos.length){

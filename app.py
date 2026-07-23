@@ -293,12 +293,34 @@ def _split_one(project_id, batch, ad, video_path_str, work_str, engine, precise,
     return len(shots), 0.0
 
 
+def _download_url(url, dest):
+    import requests
+    with requests.get(url, stream=True, timeout=600,
+                      headers={"User-Agent": "Mozilla/5.0"}) as r:
+        r.raise_for_status()
+        with open(dest, "wb") as f:
+            for chunk in r.iter_content(1 << 16):
+                if chunk:
+                    f.write(chunk)
+    return dest
+
+
 def _run_split_batch_bg(project_id, batch, items, work_str, engine, precise, keep_raw, job_id):
-    """一个批次一个后台任务：依次拆每个视频，汇总成败/成本。"""
+    """一个批次一个后台任务：依次处理每个视频（本地文件或 URL 下载），汇总成败/成本。"""
+    import r2_storage as r2
     t0 = time.time(); okn = 0; total_shots = 0; total_cost = 0.0; fails = []
-    for ad, vpath in items:
+    for it in items:
+        ad = it["ad"]; src = it.get("src"); path = it.get("path")
         try:
-            n, cost = _split_one(project_id, batch, ad, vpath, work_str, engine, precise, keep_raw)
+            if not path:                       # URL 项：先下载
+                path = os.path.join(work_str, ad + ".mp4")
+                _download_url(src, path)
+            n, cost = _split_one(project_id, batch, ad, path, work_str, engine, precise, keep_raw)
+            if src:                            # 记录原视频 URL，供结果页展示可跳转
+                sj = os.path.join(work_str, ad + "_source.json")
+                with open(sj, "w", encoding="utf-8") as f:
+                    json.dump({"url": src}, f, ensure_ascii=False)
+                r2.upload_file(f"projects/{project_id}/{batch}/{ad}/source.json", sj)
             okn += 1; total_shots += n; total_cost += cost
         except Exception as e:
             fails.append(f"{ad}({type(e).__name__})")
@@ -310,25 +332,51 @@ def _run_split_batch_bg(project_id, batch, items, work_str, engine, precise, kee
     shutil.rmtree(work_str, ignore_errors=True)
 
 
+def _ad_from_url(url, used):
+    from urllib.parse import urlparse, unquote
+    import re as _re
+    base = unquote(urlparse(url).path.rsplit("/", 1)[-1])
+    base = _re.sub(r"\.[a-zA-Z0-9]{1,5}$", "", base)          # 去扩展名
+    base = _re.sub(r"[^\w一-龥-]", "", base) or "url"  # 只留字母数字中文-_
+    ad = base
+    i = 2
+    while ad in used:
+        ad = f"{base}_{i}"; i += 1
+    used.add(ad)
+    return ad
+
+
 @app.post("/split_batch")
 def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
                 engine: str = Form(default="cpu"), precise: bool = Form(default=True),
-                keep_raw: bool = Form(default=False),
-                files: List[UploadFile] = File(...),
+                keep_raw: bool = Form(default=False), urls: str = Form(default=""),
+                files: Optional[List[UploadFile]] = File(None),
                 x_api_token: str = Header(default="")):
-    """本次上传的多个视频 = 一个批次 = 一条任务。"""
+    """本次上传（本地文件 + 粘贴的 URL）= 一个批次 = 一条任务。"""
     _check_token(x_api_token)
     batch = batch or time.strftime("%Y%m%d-%H%M%S")
     engine = (engine or "cpu").lower()
     work = Path(tempfile.mkdtemp(prefix="splitb_"))
-    items = []
-    for f in files:
+    items = []; used = set()
+    for f in (files or []):
         ad = Path(f.filename or "ad").stem
+        used.add(ad)
         vp = work / (f.filename or (ad + ".mp4"))
         with open(vp, "wb") as out:
             shutil.copyfileobj(f.file, out)
-        items.append((ad, str(vp)))
-    ref = "、".join(a for a, _ in items)[:60]
+        items.append({"ad": ad, "path": str(vp)})
+    try:
+        url_list = json.loads(urls) if urls else []
+    except Exception:
+        url_list = []
+    for u in url_list:
+        u = (u or "").strip()
+        if not u:
+            continue
+        items.append({"ad": _ad_from_url(u, used), "src": u})
+    if not items:
+        raise HTTPException(status_code=400, detail="没有视频（本地文件或 URL 至少一个）")
+    ref = "、".join(it["ad"] for it in items)[:60]
     job_id = db.start_job("split", project_id, ref, engine=engine, batch=batch)
     threading.Thread(target=_run_split_batch_bg,
                      args=(project_id, batch, items, str(work), engine, precise, keep_raw, job_id),
@@ -336,7 +384,7 @@ def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
     return {"ok": True, "started": True, "job_id": job_id, "batch": batch, "n": len(items)}
 
 
-@app.post("/split")
+@app.post("/split")@app.post("/split")
 def split(project_id: str = Form(...),
           ad_id: str = Form(default=""),
           precise: bool = Form(default=True),
@@ -374,7 +422,7 @@ def result(project_id: str, include_content: bool = True,
 
     objects = [{"key": k, "url": r2.public_url(k)} for k in keys]
 
-    WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json")
+    WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json", "source.json")
     reports = {}
     if include_content:
         for k in keys:
