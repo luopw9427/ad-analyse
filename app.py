@@ -384,7 +384,7 @@ def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
     return {"ok": True, "started": True, "job_id": job_id, "batch": batch, "n": len(items)}
 
 
-@app.post("/split")@app.post("/split")
+@app.post("/split")
 def split(project_id: str = Form(...),
           ad_id: str = Form(default=""),
           precise: bool = Form(default=True),
