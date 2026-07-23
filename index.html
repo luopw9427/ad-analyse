@@ -112,11 +112,20 @@
   .bi-tabs button.on{background:var(--panel);color:var(--accent);font-weight:600;box-shadow:0 1px 3px rgba(16,24,40,.12)}
   .bi-en-wait{color:var(--muted);padding:8px 2px;font-size:13px}
   .bi-en-wait::before{content:"⏳ "}
-  #drawerTab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:60;
-    background:var(--accent);color:#fff;writing-mode:vertical-rl;letter-spacing:3px;
-    padding:16px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;z-index:60;
+  .fav-star{border:0;background:transparent;cursor:pointer;color:#c9ccd4;font-size:15px;line-height:1;padding:2px 4px;vertical-align:middle}
+  .fav-star:hover{color:#f4b400}
+  .fav-star.on{color:#f4b400}
+  .fav-clip{position:absolute;top:4px;right:4px;z-index:2;background:rgba(255,255,255,.85);border-radius:6px}
+  .fav-row{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:10px 0;position:relative}
+  .fav-row .rm{position:absolute;top:8px;right:10px}
+  .fav-kind-h{font-size:12px;color:var(--sub);font-weight:600;margin:14px 0 6px}
+  #drawerTabs{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:60;
+    display:flex;flex-direction:column;gap:6px}
+  #drawerTabs .dtab{background:var(--accent);color:#fff;writing-mode:vertical-rl;letter-spacing:3px;
+    padding:14px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;
     box-shadow:-3px 0 10px rgba(16,24,40,.15);user-select:none}
-  #drawerTab:hover{background:var(--accent-ink)}
+  #drawerTabs .dtab.fav{background:#f4b400}
+  #drawerTabs .dtab:hover{filter:brightness(1.08)}
   #drawer{position:fixed;top:0;right:0;height:100vh;width:var(--drawer-w);z-index:55;
     background:var(--panel);border-left:1px solid var(--line);
     box-shadow:-12px 0 36px rgba(16,24,40,.12);overflow:hidden;
@@ -124,7 +133,7 @@
   body.drawer-open #drawer{transform:translateX(0)}
   #page>main{transition:margin-right .26s ease}
   body.drawer-open #page>main{margin-right:var(--drawer-w)}
-  body.drawer-open #drawerTab{display:none}   /* 展开时隐藏「全部结果」标签 */
+  body.drawer-open #drawerTabs{display:none}   /* 展开时隐藏右侧标签 */
   #drawerBody{height:100%;overflow-y:auto;padding:22px 22px 60px}
   #drawerGrip{position:absolute;left:0;top:0;width:7px;height:100%;cursor:ew-resize;z-index:3}
   #drawerGrip:hover{background:var(--accent-weak)}
@@ -223,7 +232,10 @@
 </main>
 
 </div><!--/page-->
-<div id="drawerTab" onclick="toggleDrawer()">全部结果 ‹</div>
+<div id="drawerTabs">
+  <div class="dtab" onclick="openDrawerMode('all')">全部结果 ‹</div>
+  <div class="dtab fav" onclick="openDrawerMode('fav')">收藏 ‹</div>
+</div>
 <div id="drawer"><div id="drawerGrip" title="拖动调整宽度"></div><button id="drawerCollapse" title="收起" onclick="closeDrawer()">›</button><div id="drawerBody"></div></div>
 <script>
 const $=s=>document.querySelector(s);
@@ -353,6 +365,49 @@ function newBatchId(){const d=new Date(),z=n=>String(n).padStart(2,'0');
 let _res=null;            // 缓存 /result 解析结果 {ads,common,vids,count}
 let _resLimit=5;          // 结果卡片默认展示条数
 
+// ===== 个人收藏 =====
+let favUser=localStorage.getItem('favUser')||'default';   // 暂无登录，先用预置用户
+let _favSet=new Set();    // 已收藏的 ref 集合（用于 ⭐ 亮/灭）
+let _favData=[];          // 收藏明细
+let _drawerMode='all';    // 右边栏视图：all 全部结果 / fav 我的收藏
+function favHead(){return {...headers(),'X-Fav-User':favUser};}
+async function loadFavs(){
+  try{const r=await fetch('/fav/list',{headers:favHead()});if(!r.ok)throw 0;
+    const d=await r.json();_favData=d.favorites||[];_favSet=new Set(_favData.map(f=>f.ref));}
+  catch(e){_favData=[];_favSet=new Set();}
+}
+async function favApi(path,body){
+  const r=await fetch(path,{method:'POST',headers:{...favHead(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok)throw new Error(path+' -> '+r.status);return r.json();
+}
+function favStar(kind,ref,label,meta){
+  const b=document.createElement('button');b.className='fav-star';b.type='button';
+  const on=_favSet.has(ref);b.textContent=on?'★':'☆';if(on)b.classList.add('on');
+  b.title=on?'取消收藏':'收藏';
+  b.onclick=e=>{e.stopPropagation();e.preventDefault();toggleFav(kind,ref,label,meta,b);};
+  return b;
+}
+async function toggleFav(kind,ref,label,meta,btn){
+  const on=_favSet.has(ref);
+  try{
+    if(on){await favApi('/fav/remove',{ref});_favSet.delete(ref);}
+    else{await favApi('/fav/add',{kind,ref,label:label||'',meta:meta||{}});_favSet.add(ref);
+         _favData.unshift({kind,ref,label:label||'',meta:meta||{}});}
+  }catch(e){alert('收藏操作失败：'+e.message);return;}
+  if(on)_favData=_favData.filter(f=>f.ref!==ref);
+  if(btn){const nb=_favSet.has(ref);btn.textContent=nb?'★':'☆';btn.classList.toggle('on',nb);btn.title=nb?'取消收藏':'收藏';}
+  if(_drawerMode==='fav')renderDrawer();
+  document.querySelectorAll('#jobs .fav-star').forEach(s=>{if(s.dataset.ref===ref){const nb=_favSet.has(ref);s.textContent=nb?'★':'☆';s.classList.toggle('on',nb);}});
+}
+async function openDrawerMode(mode){
+  if(mode==='fav')await loadFavs();
+  _drawerMode=mode;renderDrawer();openDrawer();
+}
+async function setDrawerMode(mode){
+  if(mode==='fav')await loadFavs();
+  _drawerMode=mode;renderDrawer();
+}
+
 async function viewJob(kind,ref,batch,detail,status){
   if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail);return}
   await ensureResult();
@@ -456,7 +511,12 @@ async function loadJobs(){
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
     let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
     const splitRef={};d.jobs.forEach(j=>{if(j.kind==='split'&&j.batch&&j.ref)splitRef[j.batch]=j.ref});
-    d.jobs.slice(0,_jobLimit).forEach(j=>{const objName=(j.kind==='analyze'&&splitRef[j.batch])?splitRef[j.batch]:(j.ref||'');const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
+    d.jobs.slice(0,_jobLimit).forEach(j=>{const objName=(j.kind==='analyze'&&splitRef[j.batch])?splitRef[j.batch]:(j.ref||'');const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');
+      const fref='task|'+j.project_id+'|'+(j.batch||j.ref||'');
+      const fmeta={project:j.project_id,batch:(j.batch||''),jobKind:j.kind,label:objName};
+      const fon=_favSet.has(fref)?' on':'';const fstar=_favSet.has(fref)?'★':'☆';
+      const slot=`<button class="fav-star${fon}" type="button" data-ref="${fref.replace(/"/g,'&quot;')}" data-kind="task" data-label="${(objName||'').replace(/"/g,'&quot;')}" data-meta='${JSON.stringify(fmeta).replace(/'/g,"&#39;")}' title="收藏/取消收藏">${fstar}</button>`;
+      h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -467,14 +527,21 @@ async function loadJobs(){
          <b style="color:var(--ink)">$${total.toFixed(4)} ≈ ¥${(total*7.2).toFixed(2)}</b>${moreBtn}
          <div style="margin-top:4px;color:var(--muted)">分析为 OpenRouter 实际扣费；GPU 拆分为估算（带 ≈）</div>
        </div>`;
-    wireObjScroll();
+    wireObjScroll();wireFavStars();
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
+}
+function wireFavStars(){
+  document.querySelectorAll('#jobs .fav-star').forEach(s=>{
+    s.onclick=e=>{e.stopPropagation();e.preventDefault();
+      let meta={};try{meta=JSON.parse(s.dataset.meta||'{}')}catch(_){}
+      toggleFav('task',s.dataset.ref,s.dataset.label||'',meta,s);};
+  });
 }
 
 function adFromKey(k,pid){const rest=k.replace('projects/'+pid+'/','');const p=rest.split('/');return p.length>=2?p[0]:null}
 
 async function loadAll(){
-  remember();setStatus('加载中…');await loadJobs();
+  remember();setStatus('加载中…');await loadFavs();await loadJobs();
   _res=null;
   await ensureResult(true);
   renderDrawer();
@@ -521,10 +588,17 @@ async function ensureResult(force){
 
 // 右侧抽屉：按批次分组展示全部结果
 function drawerAll(open){document.querySelectorAll('#drawer details').forEach(d=>d.open=open)}
+function drawerModeSwitch(){
+  return '<div class="bi-tabs" style="margin-bottom:12px">'
+    +'<button class="'+(_drawerMode==='all'?'on':'')+'" onclick="setDrawerMode(\'all\')">全部结果</button>'
+    +'<button class="'+(_drawerMode==='fav'?'on':'')+'" onclick="setDrawerMode(\'fav\')">我的收藏</button></div>';
+}
 function renderDrawer(){
   _enReg={};            // 重建面板前清空英文待填登记，避免指向已弃用的旧节点
   const dr=$('#drawerBody');
-  dr.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
+  if(_drawerMode==='fav'){dr.innerHTML=drawerModeSwitch();renderFavInto(dr);return;}
+  dr.innerHTML=drawerModeSwitch()
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     +'<h2 style="margin:0">全部结果</h2>'
     +'<div><button class="mini" onclick="drawerAll(true)">全部展开</button>'
     +'<button class="mini" onclick="drawerAll(false)">全部收起</button></div></div>';
@@ -532,6 +606,43 @@ function renderDrawer(){
   const bs=Object.keys(_res.batches).sort().reverse();  // 新批次在上
   if(!bs.length){dr.innerHTML+='<div class="muted">该项目暂无批次</div>';return}
   bs.forEach(b=>dr.appendChild(drawerBatch(b)));
+}
+// 收藏视图：按类型分组
+function renderFavInto(dr){
+  if(!_favData.length){const p=document.createElement('div');p.className='muted';p.style.padding='6px';p.textContent='还没有收藏。在任务行、视频切片、提示词上点 ☆ 即可收藏。';dr.appendChild(p);return;}
+  const groups=[['task','任务'],['clip','视频片段'],['prompt','提示词']];
+  groups.forEach(([kind,name])=>{
+    const items=_favData.filter(f=>f.kind===kind);if(!items.length)return;
+    const h=document.createElement('div');h.className='fav-kind-h';h.textContent=name+'（'+items.length+'）';dr.appendChild(h);
+    items.forEach(f=>dr.appendChild(favRow(f)));
+  });
+}
+function favRow(f){
+  const m=f.meta||{};const row=document.createElement('div');row.className='fav-row';
+  const rm=document.createElement('button');rm.className='mini del rm';rm.textContent='✕ 取消';
+  rm.onclick=()=>toggleFav(f.kind,f.ref,f.label,m,null);row.appendChild(rm);
+  const t=document.createElement('div');t.style.cssText='font-weight:600;margin-bottom:6px;padding-right:56px;word-break:break-all';
+  if(f.kind==='task'){
+    t.textContent='['+(m.jobKind||'任务')+'] '+(f.label||m.batch||'');row.appendChild(t);
+    const sub=document.createElement('div');sub.className='muted';sub.style.fontSize='12px';sub.textContent='批次 '+(m.batch||'-')+' · 项目 '+(m.project||'-');row.appendChild(sub);
+    const btn=document.createElement('button');btn.className='mini';btn.textContent='查看该批次';btn.style.marginTop='8px';
+    btn.onclick=()=>favOpenTask(m.project,m.batch);row.appendChild(btn);
+  }else if(f.kind==='clip'){
+    t.textContent=f.label||m.name||'切片';row.appendChild(t);
+    if(m.url){const v=document.createElement('video');v.src=m.url;v.controls=true;v.preload='metadata';v.style.cssText='width:100%;max-width:280px;border-radius:8px;margin-top:4px';row.appendChild(v);
+      const a=document.createElement('div');a.style.marginTop='4px';a.innerHTML='<a href="'+m.url+'" target="_blank" rel="noopener" style="color:var(--accent);font-size:12px">在新标签打开</a>';row.appendChild(a);}
+  }else if(f.kind==='prompt'){
+    t.innerHTML=(f.label||'提示词')+' <span class="muted" style="font-weight:400;font-size:12px">· '+(m.lang==='en'?'英文':'中文')+(m.batch?(' · 批次 '+m.batch):'')+(m.ad?(' · '+m.ad):'')+'</span>';row.appendChild(t);
+    if(m.卖点)row.appendChild(tags(m.卖点));
+    row.appendChild(promptBlock(m.text||''));
+  }
+  return row;
+}
+async function favOpenTask(project,batch){
+  if(project&&project!==proj()){$('#project').value=project;_res=null;}
+  _drawerMode='all';
+  if(!_res)await ensureResult(true);
+  renderDrawer();focusBatch(batch);
 }
 function drawerBatch(batch,openTop){
   const bo=_res.batches[batch];const nAds=Object.keys(bo.ads).length;
@@ -630,10 +741,15 @@ async function downloadAd(batch,ad){
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
 }
 
-// 详情内容（每个片段可单独收起）
-function promptItem(it){
+// 详情内容（每个片段可单独收起）。ctx 给了则加 ⭐ 收藏
+function promptItem(it,ctx){
   const d=document.createElement('details');d.open=true;d.className='pi';
-  const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');d.appendChild(sm);
+  const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');
+  if(ctx){const title=it.标题||('镜头'+((ctx.idx||0)+1));
+    const ref='prompt|'+ctx.project+'|'+ctx.batch+'|'+(ctx.ad||'common')+'|'+ctx.ptype+'|'+ctx.lang+'|'+(ctx.idx||0);
+    const meta={project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:ctx.ptype,lang:ctx.lang,title:title,text:it.prompt||'',卖点:it.卖点||[]};
+    sm.appendChild(favStar('prompt',ref,title,meta));}
+  d.appendChild(sm);
   d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
   return d;
 }
@@ -679,20 +795,24 @@ function buildAggBox(agg){
   if(agg.解决痛点){const h=document.createElement('h3');h.textContent='痛点';f.appendChild(h);f.appendChild(tags(agg.解决痛点,'pain'));}
   return f;
 }
-function buildVpBox(vp){
+function buildVpBox(vp,ctx){
   vp=vp||{};const det=document.createElement('details');det.open=true;
-  const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';det.appendChild(sm);
+  const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';
+  if(ctx){const ref='prompt|'+ctx.project+'|'+ctx.batch+'|'+ctx.ad+'|video|'+ctx.lang;
+    const meta={project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:'video',lang:ctx.lang,title:'视频级脚本 prompt',text:vp.video_prompt_text||''};
+    sm.appendChild(favStar('prompt',ref,'视频级脚本 prompt',meta));}
+  det.appendChild(sm);
   det.appendChild(promptBlock(vp.video_prompt_text||''));return det;
 }
-function buildSpBox(sp){
+function buildSpBox(sp,ctx){
   const list=((sp||{}).镜头级prompt列表)||[];const det=document.createElement('details');det.open=true;
   const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条）';det.appendChild(sm);
-  list.forEach(it=>det.appendChild(promptItem(it)));return det;
+  list.forEach((it,i)=>det.appendChild(promptItem(it,ctx?{...ctx,ptype:'shot',idx:i}:null)));return det;
 }
-function buildCommonBody(v){
+function buildCommonBody(v,ctx){
   v=v||{};const f=document.createDocumentFragment();
   if(v.商品共性卖点)f.appendChild(tags(v.商品共性卖点));
-  ((v.共性镜头prompt列表)||[]).forEach(it=>f.appendChild(promptItem(it)));
+  ((v.共性镜头prompt列表)||[]).forEach((it,i)=>f.appendChild(promptItem(it,ctx?{...ctx,ptype:'common',ad:'common',idx:i}:null)));
   return f;
 }
 
@@ -704,20 +824,27 @@ function renderAdDetail(batch,ad,d,videos){
     const det=document.createElement('details');det.open=true;
     const sm=document.createElement('summary');sm.textContent='镜头切片（'+videos.length+'）';det.appendChild(sm);
     const w=document.createElement('div');w.className='shots';w.style.marginTop='6px';
-    videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;v.preload='metadata';w.appendChild(v)});
+    videos.forEach(u=>{
+      const cell=document.createElement('div');cell.style.position='relative';
+      const v=document.createElement('video');v.src=u;v.controls=true;v.preload='metadata';cell.appendChild(v);
+      const name=(u.split('/').pop()||'切片').split('?')[0];
+      const st=favStar('clip','clip|'+u,ad+' · '+name,{project:proj(),batch:batch,ad:ad,url:u,name:name});
+      st.classList.add('fav-clip');cell.appendChild(st);
+      w.appendChild(cell);});
     det.appendChild(w);frag.appendChild(det);
   }
+  const vpctx={project:proj(),batch:batch,ad:ad,lang:'zh'};
   if(agg.广告主张||agg.商品卖点||agg.解决痛点){
     frag.appendChild(biBlock(buildAggBox(agg),'en|'+batch+'|'+ad+'|agg',
       ()=>{const a=_adOf(batch,ad);return hasContent(a&&a.agg_en)?a.agg_en:null;},buildAggBox));
   }
   if(vp.video_prompt_text){
-    frag.appendChild(biBlock(buildVpBox(vp),'en|'+batch+'|'+ad+'|vp',
-      ()=>{const a=_adOf(batch,ad);return (a&&a.vp_en&&a.vp_en.video_prompt_text)?a.vp_en:null;},buildVpBox));
+    frag.appendChild(biBlock(buildVpBox(vp,vpctx),'en|'+batch+'|'+ad+'|vp',
+      ()=>{const a=_adOf(batch,ad);return (a&&a.vp_en&&a.vp_en.video_prompt_text)?a.vp_en:null;},d=>buildVpBox(d,{...vpctx,lang:'en'})));
   }
   if(((sp.镜头级prompt列表)||[]).length){
-    frag.appendChild(biBlock(buildSpBox(sp),'en|'+batch+'|'+ad+'|sp',
-      ()=>{const a=_adOf(batch,ad);return (a&&a.sp_en&&(a.sp_en.镜头级prompt列表||[]).length)?a.sp_en:null;},buildSpBox));
+    frag.appendChild(biBlock(buildSpBox(sp,vpctx),'en|'+batch+'|'+ad+'|sp',
+      ()=>{const a=_adOf(batch,ad);return (a&&a.sp_en&&(a.sp_en.镜头级prompt列表||[]).length)?a.sp_en:null;},d=>buildSpBox(d,{...vpctx,lang:'en'})));
   }
   return frag;
 }
@@ -729,8 +856,9 @@ function renderCommon(v,batch){
   c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 本批次归纳）</span></h2>';
   const dc=document.createElement('button');dc.className='mini';dc.textContent='⬇ 下载共性(json)';
   dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');c.appendChild(dc);
-  c.appendChild(biBlock(buildCommonBody(v),'en|'+batch+'|common',
-    ()=>{const b=_res&&_res.batches&&_res.batches[batch];return hasContent(b&&b.common_en)?b.common_en:null;},buildCommonBody));
+  const cctx={project:proj(),batch:batch,ad:'common',lang:'zh'};
+  c.appendChild(biBlock(buildCommonBody(v,cctx),'en|'+batch+'|common',
+    ()=>{const b=_res&&_res.batches&&_res.batches[batch];return hasContent(b&&b.common_en)?b.common_en:null;},d=>buildCommonBody(d,{...cctx,lang:'en'})));
   return c;
 }
 

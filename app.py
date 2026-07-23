@@ -45,6 +45,8 @@ ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+# 收藏：暂无登录，先用预置用户；将来登录做好后由前端传登录用户名到 X-Fav-User
+FAV_DEFAULT_USER = os.environ.get("FAV_DEFAULT_USER", "default")
 # 分析产物里需要翻译成英文的 JSON（键名结构保留，只译值）→ 存为同名 .en.json
 TRANSLATE_NAMES = ("ad_aggregate.json", "video_prompt.json",
                    "shot_prompts.json", "共性镜头prompt.json")
@@ -81,6 +83,12 @@ app = FastAPI(title="视频广告分析服务", version="0.3")
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    db.fav_user_ensure(FAV_DEFAULT_USER)   # 预置默认收藏用户
+
+
+def _fav_owner(x_fav_user: str) -> str:
+    """当前收藏归属用户。暂无登录：用请求头，缺省回退预置用户。"""
+    return (x_fav_user or "").strip() or FAV_DEFAULT_USER
 
 
 def _check_token(x_api_token: str):
@@ -625,3 +633,62 @@ def jobs_delete(req: JobDeleteReq, x_api_token: str = Header(default="")):
     """删除单条任务记录（不动 R2 文件）。"""
     _check_token(x_api_token)
     return {"ok": True, "deleted": db.delete_job(req.job_id)}
+
+
+# ── 个人收藏 ─────────────────────────────────────────────────────
+class FavAddReq(BaseModel):
+    kind: str                       # task / clip / prompt
+    ref: str                        # 去重键
+    label: Optional[str] = ""
+    meta: Optional[dict] = None
+
+
+class FavRemoveReq(BaseModel):
+    ref: str
+
+
+class FavAuthReq(BaseModel):
+    username: str
+    pin: str = ""
+
+
+@app.get("/fav/list")
+def fav_list(x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
+    _check_token(x_api_token)
+    owner = _fav_owner(x_fav_user)
+    return {"owner": owner, "favorites": db.fav_list(owner), "db_enabled": db.enabled()}
+
+
+@app.post("/fav/add")
+def fav_add(req: FavAddReq, x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
+    _check_token(x_api_token)
+    owner = _fav_owner(x_fav_user)
+    ok = db.fav_add(owner, req.kind, req.ref, req.label or "", req.meta or {})
+    if not ok:
+        raise HTTPException(status_code=500, detail="收藏失败（未接数据库？）")
+    return {"ok": True, "owner": owner, "ref": req.ref}
+
+
+@app.post("/fav/remove")
+def fav_remove(req: FavRemoveReq, x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
+    _check_token(x_api_token)
+    owner = _fav_owner(x_fav_user)
+    return {"ok": True, "removed": db.fav_remove(owner, req.ref)}
+
+
+# 登录脚手架（前端暂不接；将来做登录时启用）
+@app.post("/fav/register")
+def fav_register(req: FavAuthReq, x_api_token: str = Header(default="")):
+    _check_token(x_api_token)
+    ok, msg = db.fav_register(req.username.strip(), req.pin)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True, "username": req.username.strip()}
+
+
+@app.post("/fav/login")
+def fav_login(req: FavAuthReq, x_api_token: str = Header(default="")):
+    _check_token(x_api_token)
+    if not db.fav_login(req.username.strip(), req.pin):
+        raise HTTPException(status_code=401, detail="用户名或口令错误")
+    return {"ok": True, "username": req.username.strip()}
