@@ -39,10 +39,16 @@ from pydantic import BaseModel
 
 import r2_storage as r2
 import db
+import translator
 
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+# 分析产物里需要翻译成英文的 JSON（键名结构保留，只译值）→ 存为同名 .en.json
+TRANSLATE_NAMES = ("ad_aggregate.json", "video_prompt.json",
+                   "shot_prompts.json", "共性镜头prompt.json")
+TRANSLATE_WORKERS = int(os.environ.get("TRANSLATE_WORKERS", "4"))
 MODAL_SPLIT_URL = os.environ.get("MODAL_SPLIT_URL", "")     # Modal GPU 拆分接口
 MODAL_SPLIT_TOKEN = os.environ.get("MODAL_SPLIT_TOKEN", "")
 # ── 拆分成本模型 ────────────────────────────────────────────────
@@ -91,6 +97,8 @@ class AnalyzeReq(BaseModel):
     cross_compare: bool = False
     hypotheses: Optional[str] = None   # 前置卖点提示（可选，逗号分隔）
     openrouter_key: Optional[str] = None   # 前端传入，留空则用服务端环境变量
+    deepseek_key: Optional[str] = None     # 翻译用；留空则用服务端 DEEPSEEK_API_KEY
+    translate: bool = True                 # 分析完成后是否自动翻译成英文
     batch: Optional[str] = None            # 本次批次；给了则只分析这一批
     custom_prompts: Optional[dict] = None  # {环节key: 提示词文本}，覆盖默认
 
@@ -176,8 +184,73 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
                       (summ if ok else log[-800:]),
                       time.time() - t0,
                       cost_usd=cost, tokens_in=tin, tokens_out=tout, cost_exact=True)
+        # 分析成功后：另起后台线程做中→英翻译，结果先展示、英文陆续填充
+        if ok and req.translate:
+            ds_key = req.deepseek_key or DEEPSEEK_API_KEY
+            if ds_key:
+                instr = translator.pick_instr((req.custom_prompts or {}).get("translate"))
+                threading.Thread(
+                    target=_translate_bg,
+                    args=(req.project_id, req.batch or "", instr, ds_key),
+                    daemon=True).start()
+            else:
+                print("[translate] 跳过：未配置 DEEPSEEK_API_KEY")
     except Exception as e:
         db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+def _translate_bg(project_id, batch, instr, ds_key):
+    """后台并发翻译：把批次内生成的中文 JSON 译成英文，逐个上传 <名>.en.json。"""
+    prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
+    ref = batch or project_id
+    job_id = db.start_job("translate", project_id, ref, batch=batch or "")
+    t0 = time.time()
+    try:
+        keys = r2.list_keys(prefix)
+        # 选出需翻译且尚未翻译（跳过 .en.json 自身）的中文 JSON
+        todo = [k for k in keys
+                if any(k.endswith(n) for n in TRANSLATE_NAMES) and not k.endswith(".en.json")]
+        if not todo:
+            db.finish_job(job_id, True, prefix, "无可翻译产物", time.time() - t0,
+                          cost_usd=0.0, cost_exact=False)
+            return
+
+        client = translator._client(ds_key)
+        n_ok = n_fail = 0
+        tot_in = tot_out = 0
+
+        def _one(k):
+            try:
+                obj = r2.read_json(k)
+            except Exception as e:
+                return k, False, 0, 0, f"读取失败 {e}"
+            en, tin, tout = translator.translate_obj(obj, instr, client)
+            if en is None:
+                return k, False, tin, tout, "翻译失败"
+            en_key = k[:-len(".json")] + ".en.json"   # 同路径 .en.json
+            try:
+                r2.upload_json(en_key, en)
+            except Exception as e:
+                return k, False, tin, tout, f"上传失败 {e}"
+            return k, True, tin, tout, en_key
+
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        with ThreadPoolExecutor(max_workers=TRANSLATE_WORKERS) as ex:
+            futs = [ex.submit(_one, k) for k in todo]
+            for f in as_completed(futs):
+                _k, good, tin, tout, info = f.result()
+                tot_in += tin; tot_out += tout
+                if good:
+                    n_ok += 1; print(f"[translate] ✓ {info}")
+                else:
+                    n_fail += 1; print(f"[translate] ✗ {_k}: {info}")
+
+        cost = translator.cost_of(tot_in, tot_out)
+        summ = f"英文翻译 {n_ok}/{len(todo)} 完成" + (f" · 失败{n_fail}" if n_fail else "")
+        db.finish_job(job_id, n_fail == 0, prefix, summ, time.time() - t0,
+                      cost_usd=cost, tokens_in=tot_in, tokens_out=tot_out, cost_exact=False)
+    except Exception as e:
+        db.finish_job(job_id, False, "", f"翻译异常 {type(e).__name__}: {e}", time.time() - t0)
 
 
 @app.post("/analyze")
@@ -422,7 +495,8 @@ def result(project_id: str, include_content: bool = True,
 
     objects = [{"key": k, "url": r2.public_url(k)} for k in keys]
 
-    WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json", "source.json")
+    WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json", "source.json",
+            "ad_aggregate.en.json", "video_prompt.en.json", "shot_prompts.en.json", "共性镜头prompt.en.json")
     reports = {}
     if include_content:
         for k in keys:
@@ -525,12 +599,12 @@ def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str
 
     # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
     if ad_id:
-        try:
-            common_key = (f"projects/{project_id}/{batch}/共性镜头prompt.json" if batch
-                          else f"projects/{project_id}/共性镜头prompt.json")
-            r2.download_file(common_key, localdir / "共性镜头prompt.json")
-        except Exception:
-            pass
+        cbase = (f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/")
+        for cname in ("共性镜头prompt.json", "共性镜头prompt.en.json"):
+            try:
+                r2.download_file(cbase + cname, localdir / cname)
+            except Exception:
+                pass
 
     # 首图：直接用 shot_000.mp4 作为封面参考（不再服务端抽帧，避免 ffmpeg 卡住导致 502）
     zip_path = work / f"{dl_name}.zip"

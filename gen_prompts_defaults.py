@@ -6,6 +6,7 @@ SPECS = [
  ("shot_prompt","批处理/shot_prompt_generator.py","PROMPT","单广告镜头prompt","拆出≥N条独立单镜头prompt"),
  ("common_shot","批处理/common_shot_prompt_generator.py","PROMPT","共性镜头prompt","本批次共性≥N条通用镜头prompt"),
  ("compare","批处理/batch_analyze.py","COMPARE_PROMPT","横向对比","跨广告11维度对比报告"),
+ ("translate","translator.py","TRANSLATE_PROMPT","提示词翻译（中→英）","分析完成后用 DeepSeek 把生成的中文提示词/卖点译成英文，保持结构与字段一致"),
 ]
 def get_const(path, name):
     tree = ast.parse(open(path,encoding="utf-8").read())

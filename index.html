@@ -103,6 +103,11 @@
   summary.ad-sum{font-size:14px;color:var(--ink);padding:2px 0 8px}
   details.pi{margin-left:18px;padding-left:12px;border-left:2px solid var(--line-2);margin-top:6px}
   details.pi>summary{color:var(--ink)}
+  .bi-tabs{display:inline-flex;gap:2px;margin:2px 0 6px;background:var(--line-2);border-radius:8px;padding:2px}
+  .bi-tabs button{border:0;background:transparent;color:var(--muted);font-size:12px;padding:3px 12px;border-radius:6px;cursor:pointer}
+  .bi-tabs button.on{background:var(--panel);color:var(--accent);font-weight:600;box-shadow:0 1px 3px rgba(16,24,40,.12)}
+  .bi-en-wait{color:var(--muted);padding:8px 2px;font-size:13px}
+  .bi-en-wait::before{content:"⏳ "}
   #drawerTab{position:fixed;top:50%;right:0;transform:translateY(-50%);z-index:60;
     background:var(--accent);color:#fff;writing-mode:vertical-rl;letter-spacing:3px;
     padding:16px 7px;border-radius:9px 0 0 9px;cursor:pointer;font-size:12px;z-index:60;
@@ -113,8 +118,8 @@
     box-shadow:-12px 0 36px rgba(16,24,40,.12);overflow:hidden;
     transform:translateX(100%);transition:transform .28s ease}
   body.drawer-open #drawer{transform:translateX(0)}
-  #page{transition:margin-right .26s ease}
-  body.drawer-open #page{margin-right:var(--drawer-w)}
+  #page>main{transition:margin-right .26s ease}
+  body.drawer-open #page>main{margin-right:var(--drawer-w)}
   #drawerBody{height:100%;overflow-y:auto;padding:22px 22px 60px}
   #drawerGrip{position:absolute;left:0;top:0;width:7px;height:100%;cursor:ew-resize;z-index:3}
   #drawerGrip:hover{background:var(--accent-weak)}
@@ -129,6 +134,10 @@
   <input id="orkey" placeholder="留空=用服务端密钥" type="password" size="16"
          title="留空即可：默认使用服务端(Railway 变量)里配置的 OpenRouter 密钥。只有想临时换一把 key 时才填，填了只保存在你本地浏览器，不会上传保存">
   <button class="eye" onclick="toggleEye('orkey',this)" title="显示/隐藏">👁</button>
+  <span class="muted">DeepSeek Key</span>
+  <input id="dskey" placeholder="留空=用服务端密钥" type="password" size="16"
+         title="翻译（中→英）用的 DeepSeek 密钥。留空即用服务端(Railway 变量)里的 DEEPSEEK_API_KEY。填了只存本地浏览器，不上传保存">
+  <button class="eye" onclick="toggleEye('dskey',this)" title="显示/隐藏">👁</button>
   <span class="muted">项目名</span>
   <input id="project" placeholder="如 test" size="10"
          title="一批广告用同一个项目名。R2 里按 projects/{项目名}/{广告}/ 存放，分析和横向对比也按项目为单位">
@@ -219,7 +228,8 @@ $('#hyp').value=localStorage.getItem('hyp')||'';
 $('#engine').value=localStorage.getItem('eng')||'gpu';
 wireDrawer();
 $('#orkey').value=localStorage.getItem('ork')||'';
-function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim())}
+$('#dskey').value=localStorage.getItem('dsk')||'';
+function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim());localStorage.setItem('dsk',$('#dskey').value.trim())}
 
 function setOps(t){$('#status').textContent=t||''}
 function logOps(t){const l=$('#opslog');l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
@@ -275,6 +285,7 @@ async function doAnalyze(){
     cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked,
     hypotheses:$('#hyp').value.trim()||null,
     openrouter_key:$('#orkey').value.trim()||null,
+    deepseek_key:$('#dskey').value.trim()||null,
     batch:batch||null,
     custom_prompts:(()=>{try{const o=JSON.parse(localStorage.getItem('customPrompts')||'{}');return Object.keys(o).length?o:null}catch(e){return null}})()};
   setStatus('提交分析…');logOps('▶ 提交分析 '+(batch?('批次 '+batch):('整个项目 '+proj()))+' …');
@@ -479,10 +490,14 @@ async function ensureResult(force){
   const B=b=>batches[b]||(batches[b]={ads:{},vids:{},common:null});
   for(const [k,v] of Object.entries(data.reports||{})){
     const info=parseKey(k,pid);if(!info)continue;
+    if(k.endsWith('共性镜头prompt.en.json')&&info.ad===null){B(info.batch).common_en=v;continue}
     if(k.endsWith('共性镜头prompt.json')&&info.ad===null){B(info.batch).common=v;continue}
     if(!info.ad)continue;
     const bo=B(info.batch);const A=bo.ads[info.ad]||(bo.ads[info.ad]={});
-    if(k.endsWith('ad_aggregate.json'))A.agg=v;
+    if(k.endsWith('ad_aggregate.en.json'))A.agg_en=v;
+    else if(k.endsWith('video_prompt.en.json'))A.vp_en=v;
+    else if(k.endsWith('shot_prompts.en.json'))A.sp_en=v;
+    else if(k.endsWith('ad_aggregate.json'))A.agg=v;
     else if(k.endsWith('video_prompt.json'))A.vp=v;
     else if(k.endsWith('shot_prompts.json'))A.sp=v;
     else if(k.endsWith('source.json'))A.source=(v&&v.url)||'';
@@ -496,6 +511,7 @@ async function ensureResult(force){
 // 右侧抽屉：按批次分组展示全部结果
 function drawerAll(open){document.querySelectorAll('#drawer details').forEach(d=>d.open=open)}
 function renderDrawer(){
+  _enReg={};            // 重建面板前清空英文待填登记，避免指向已弃用的旧节点
   const dr=$('#drawerBody');
   dr.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     +'<h2 style="margin:0">全部结果</h2>'
@@ -529,7 +545,7 @@ function adBlock(batch,ad){
   sm.innerHTML='<b>'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'
     +(agg.total_duration?(' · '+agg.total_duration+'s'):'')
     +(vp.广告结构分类&&vp.广告结构分类.主结构?(' · '+vp.广告结构分类.主结构):(agg.广告主张?'':' · 仅拆分'))+'</span>';
-  det.appendChild(sm);det.appendChild(renderAdDetail(ad,d,videos));
+  det.appendChild(sm);det.appendChild(renderAdDetail(batch,ad,d,videos));
   c.appendChild(det);return c;
 }
 
@@ -610,11 +626,69 @@ function promptItem(it){
   d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
   return d;
 }
-function renderAdDetail(ad,d,videos){
+// ===== 中英双语块：中/英 tab；英文未就绪显示"正在翻译中"，翻译完自动填充 =====
+let _enReg={};          // enId -> {get, render, pane}
+let _enTimer=null;
+function _adOf(batch,ad){const b=_res&&_res.batches&&_res.batches[batch];return b&&b.ads?b.ads[ad]:null;}
+function hasContent(o){return o&&typeof o==='object'&&Object.keys(o).length>0;}
+function biBlock(zhNode,enId,getEn,renderEn){
+  const wrap=document.createElement('div');wrap.style.margin='2px 0 4px';
+  const bar=document.createElement('div');bar.className='bi-tabs';
+  const bz=document.createElement('button');bz.textContent='中';bz.className='on';
+  const be=document.createElement('button');be.textContent='英';
+  const zh=document.createElement('div');if(zhNode)zh.appendChild(zhNode);
+  const en=document.createElement('div');en.style.display='none';
+  _fillEn(en,enId,getEn,renderEn);
+  bz.onclick=()=>{zh.style.display='';en.style.display='none';bz.className='on';be.className='';};
+  be.onclick=()=>{zh.style.display='none';en.style.display='';be.className='on';bz.className='';_fillEn(en,enId,getEn,renderEn);};
+  bar.appendChild(bz);bar.appendChild(be);wrap.appendChild(bar);wrap.appendChild(zh);wrap.appendChild(en);
+  return wrap;
+}
+function _fillEn(en,enId,getEn,renderEn){
+  const d=getEn();en.innerHTML='';
+  if(d){en.appendChild(renderEn(d));delete _enReg[enId];}
+  else{const w=document.createElement('div');w.className='bi-en-wait';w.textContent='正在翻译中…';en.appendChild(w);
+       _enReg[enId]={get:getEn,render:renderEn,pane:en};startEnPoll();}
+}
+function startEnPoll(){
+  if(_enTimer)return;let tries=0;
+  _enTimer=setInterval(async()=>{
+    if(!Object.keys(_enReg).length||tries>40){clearInterval(_enTimer);_enTimer=null;return;}
+    tries++;
+    try{await ensureResult(true);}catch(e){return;}
+    Object.keys(_enReg).forEach(id=>{const r=_enReg[id];const d=r.get();
+      if(d){r.pane.innerHTML='';r.pane.appendChild(r.render(d));delete _enReg[id];}});
+  },6000);
+}
+// 分块构造器：中英复用同一套（英文 JSON 字段与中文一致）
+function buildAggBox(agg){
+  agg=agg||{};const f=document.createDocumentFragment();
+  if(agg.广告主张){const p=document.createElement('div');p.style.margin='6px 0';p.innerHTML='<b>主张：</b>'+agg.广告主张;f.appendChild(p);}
+  if(agg.商品卖点){const h=document.createElement('h3');h.textContent='卖点';f.appendChild(h);f.appendChild(tags(agg.商品卖点));}
+  if(agg.解决痛点){const h=document.createElement('h3');h.textContent='痛点';f.appendChild(h);f.appendChild(tags(agg.解决痛点,'pain'));}
+  return f;
+}
+function buildVpBox(vp){
+  vp=vp||{};const det=document.createElement('details');det.open=true;
+  const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';det.appendChild(sm);
+  det.appendChild(promptBlock(vp.video_prompt_text||''));return det;
+}
+function buildSpBox(sp){
+  const list=((sp||{}).镜头级prompt列表)||[];const det=document.createElement('details');det.open=true;
+  const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条）';det.appendChild(sm);
+  list.forEach(it=>det.appendChild(promptItem(it)));return det;
+}
+function buildCommonBody(v){
+  v=v||{};const f=document.createDocumentFragment();
+  if(v.商品共性卖点)f.appendChild(tags(v.商品共性卖点));
+  ((v.共性镜头prompt列表)||[]).forEach(it=>f.appendChild(promptItem(it)));
+  return f;
+}
+
+function renderAdDetail(batch,ad,d,videos){
   const frag=document.createDocumentFragment();const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
   if(d.source){const p=document.createElement('div');p.style.margin='4px 0';p.innerHTML='<b>原视频：</b><a href="'+d.source+'" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">'+d.source+'</a>';frag.appendChild(p)}
   if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';frag.appendChild(p)}
-  if(agg.广告主张){const p=document.createElement('div');p.style.margin='6px 0';p.innerHTML='<b>主张：</b>'+agg.广告主张;frag.appendChild(p)}
   if(videos.length){
     const det=document.createElement('details');det.open=true;
     const sm=document.createElement('summary');sm.textContent='镜头切片（'+videos.length+'）';det.appendChild(sm);
@@ -622,19 +696,17 @@ function renderAdDetail(ad,d,videos){
     videos.forEach(u=>{const v=document.createElement('video');v.src=u;v.controls=true;v.preload='metadata';w.appendChild(v)});
     det.appendChild(w);frag.appendChild(det);
   }
-  if(agg.商品卖点){const h=document.createElement('h3');h.textContent='卖点';frag.appendChild(h);frag.appendChild(tags(agg.商品卖点))}
-  if(agg.解决痛点){const h=document.createElement('h3');h.textContent='痛点';frag.appendChild(h);frag.appendChild(tags(agg.解决痛点,'pain'))}
-  if(vp.video_prompt_text){
-    const det=document.createElement('details');det.open=true;
-    const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';det.appendChild(sm);
-    det.appendChild(promptBlock(vp.video_prompt_text));frag.appendChild(det);
+  if(agg.广告主张||agg.商品卖点||agg.解决痛点){
+    frag.appendChild(biBlock(buildAggBox(agg),'en|'+batch+'|'+ad+'|agg',
+      ()=>{const a=_adOf(batch,ad);return hasContent(a&&a.agg_en)?a.agg_en:null;},buildAggBox));
   }
-  const list=(sp.镜头级prompt列表||[]);
-  if(list.length){
-    const det=document.createElement('details');det.open=true;
-    const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条）';det.appendChild(sm);
-    list.forEach(it=>det.appendChild(promptItem(it)));
-    frag.appendChild(det);
+  if(vp.video_prompt_text){
+    frag.appendChild(biBlock(buildVpBox(vp),'en|'+batch+'|'+ad+'|vp',
+      ()=>{const a=_adOf(batch,ad);return (a&&a.vp_en&&a.vp_en.video_prompt_text)?a.vp_en:null;},buildVpBox));
+  }
+  if(((sp.镜头级prompt列表)||[]).length){
+    frag.appendChild(biBlock(buildSpBox(sp),'en|'+batch+'|'+ad+'|sp',
+      ()=>{const a=_adOf(batch,ad);return (a&&a.sp_en&&(a.sp_en.镜头级prompt列表||[]).length)?a.sp_en:null;},buildSpBox));
   }
   return frag;
 }
@@ -646,8 +718,8 @@ function renderCommon(v,batch){
   c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 本批次归纳）</span></h2>';
   const dc=document.createElement('button');dc.className='mini';dc.textContent='⬇ 下载共性(json)';
   dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');c.appendChild(dc);
-  if(v.商品共性卖点)c.appendChild(tags(v.商品共性卖点));
-  list.forEach(it=>c.appendChild(promptItem(it)));
+  c.appendChild(biBlock(buildCommonBody(v),'en|'+batch+'|common',
+    ()=>{const b=_res&&_res.batches&&_res.batches[batch];return hasContent(b&&b.common_en)?b.common_en:null;},buildCommonBody));
   return c;
 }
 
