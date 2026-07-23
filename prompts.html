@@ -27,9 +27,12 @@
   .vars{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
   .vars .lab{color:var(--sub);font-size:12px}
   .chip{background:var(--warn-bg);border:1px solid #f0c9bb;color:var(--warn);border-radius:6px;padding:2px 8px;font-size:11.5px;font-family:Consolas,monospace}
-  textarea{width:100%;min-height:220px;resize:vertical;background:var(--panel-2);border:1px solid var(--line-2);
-           border-radius:10px;padding:12px;font-size:12.5px;line-height:1.6;color:#2c3644;font-family:Consolas,"Microsoft YaHei",monospace;outline:none}
-  textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+  .editor{width:100%;min-height:220px;max-height:560px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+          background:var(--panel-2);border:1px solid var(--line-2);border-radius:10px;padding:12px;
+          font-size:12.5px;line-height:1.7;color:#2c3644;font-family:Consolas,"Microsoft YaHei",monospace;outline:none}
+  .editor:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+  .editor .ph{background:var(--warn-bg);border:1px solid #f0c9bb;color:var(--warn);border-radius:5px;
+              padding:0 4px;font-family:Consolas,monospace;white-space:nowrap;cursor:not-allowed}
   .row{display:flex;gap:10px;align-items:center;margin-top:10px}
   .st{font-size:12px}
   .st.ok{color:var(--ok)} .st.err{color:var(--warn)}
@@ -59,6 +62,29 @@ let OV={};                        // 本机覆盖 {key:text}
 try{OV=JSON.parse(localStorage.getItem('customPrompts')||'{}')}catch(e){OV={}}
 
 function hasVar(text,name){return new RegExp('\\{'+name+'(\\}|:|!)').test(text)}
+function buildEditor(el,text){
+  el.innerHTML='';const re=/\{[^{}]*\}/g;let last=0,m;
+  while((m=re.exec(text))){
+    if(m.index>last)el.appendChild(document.createTextNode(text.slice(last,m.index)));
+    const sp=document.createElement('span');sp.className='ph';sp.contentEditable='false';sp.textContent=m[0];
+    el.appendChild(sp);last=m.index+m[0].length;
+  }
+  if(last<text.length)el.appendChild(document.createTextNode(text.slice(last)));
+}
+function readEditor(el){
+  let out='';el.childNodes.forEach(n=>{
+    if(n.nodeType===3)out+=n.data;
+    else if(n.nodeType===1){
+      if(n.classList&&n.classList.contains('ph'))out+=n.textContent;
+      else if(n.tagName==='BR')out+='\n';
+      else out+=n.textContent;
+    }
+  });return out;
+}
+function wireEditor(el){
+  el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.execCommand('insertText',false,'\n')}});
+  el.addEventListener('paste',e=>{e.preventDefault();const t=(e.clipboardData||window.clipboardData).getData('text');document.execCommand('insertText',false,t)});
+}
 function missingVars(key,text){return (DEF[key].required||[]).filter(v=>!hasVar(text,v))}
 function setStatus(t){$('#status').textContent=t||''}
 
@@ -74,8 +100,8 @@ async function load(){
     const vars=document.createElement('div');vars.className='vars';
     vars.innerHTML='<span class="lab">必需占位符（不可删）：</span>'+(d.required||[]).map(v=>'<span class="chip">{'+v+'}</span>').join('');
     c.appendChild(vars);
-    const ta=document.createElement('textarea');ta.id='ta_'+key;ta.value=(OV[key]!=null?OV[key]:d.content);
-    ta.rows=Math.min(30,Math.max(10,(ta.value.split('\n').length)));c.appendChild(ta);
+    const ta=document.createElement('div');ta.id='ta_'+key;ta.className='editor';ta.contentEditable='true';
+    buildEditor(ta,(OV[key]!=null?OV[key]:d.content));wireEditor(ta);c.appendChild(ta);
     const row=document.createElement('div');row.className='row';
     const bs=document.createElement('button');bs.className='mini';bs.textContent='保存这一条';bs.onclick=()=>saveOne(key);
     const br=document.createElement('button');br.className='mini ghost';br.textContent='恢复默认';br.onclick=()=>resetOne(key);
@@ -87,7 +113,7 @@ async function load(){
 }
 
 function saveOne(key){
-  const ta=$('#ta_'+key),st=$('#st_'+key);const text=ta.value;
+  const st=$('#st_'+key);const text=readEditor($('#ta_'+key));
   const miss=missingVars(key,text);
   if(miss.length){st.className='st err';st.textContent='✗ 缺少占位符：'+miss.map(v=>'{'+v+'}').join(' ')+' —— 未保存';return false}
   if(text===DEF[key].content){delete OV[key];st.className='st';st.textContent='（与默认一致，用默认）'}
@@ -96,7 +122,7 @@ function saveOne(key){
   return true;
 }
 function resetOne(key){
-  $('#ta_'+key).value=DEF[key].content;delete OV[key];
+  buildEditor($('#ta_'+key),DEF[key].content);delete OV[key];
   localStorage.setItem('customPrompts',JSON.stringify(OV));
   const st=$('#st_'+key);st.className='st';st.textContent='已恢复默认';
 }
