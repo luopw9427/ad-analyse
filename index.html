@@ -81,6 +81,10 @@
     border-bottom:1px solid var(--line-2)}
   tbody tr:hover,table tr:hover{background:var(--panel-2)}
   td.ops{white-space:nowrap}
+  /* 任务记录：不随右边栏挤压而缩排，保持最小宽度、剩余区域横向滚动看全 */
+  #jobs{overflow-x:auto}
+  #jobs table{min-width:1040px}
+  #jobs th{white-space:nowrap}
   .objw{display:inline-block;max-width:168px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
   .objw .obj{white-space:nowrap;transition:transform .3s}
 
