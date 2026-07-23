@@ -80,6 +80,8 @@
     border-bottom:1px solid var(--line-2)}
   tbody tr:hover,table tr:hover{background:var(--panel-2)}
   td.ops{white-space:nowrap}
+  .objw{display:inline-block;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  .objw .obj{white-space:nowrap;transition:transform .3s}
 
   .badge{padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600}
   .badge.done{background:var(--ok-bg);color:var(--ok)}
@@ -374,12 +376,21 @@ function fmtCost(j){
   return (j.cost_exact===false?'≈':'')+'$'+c.toFixed(4)+' (¥'+cny+')';
 }
 
+function wireObjScroll(){
+  document.querySelectorAll('#jobs .objw').forEach(w=>{
+    const inner=w.querySelector('.obj');if(!inner)return;
+    w.onmouseenter=()=>{inner.style.display='inline-block';const ov=inner.scrollWidth-w.clientWidth;
+      if(ov>0){inner.style.transition='transform '+Math.max(1.2,ov/70)+'s linear';inner.style.transform='translateX(-'+ov+'px)'}};
+    w.onmouseleave=()=>{inner.style.transition='transform .3s';inner.style.transform='translateX(0)';
+      setTimeout(()=>{inner.style.display=''},300)};
+  });
+}
 async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
     let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
-    d.jobs.slice(0,_jobLimit).forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td>${j.ref||''}</td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
+    d.jobs.slice(0,_jobLimit).forEach(j=>{const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td><span class="objw" title="${(j.ref||'').replace(/"/g,'')}"><span class="obj">${j.ref||''}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops"><button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -390,6 +401,7 @@ async function loadJobs(){
          <b style="color:var(--ink)">$${total.toFixed(4)} ≈ ¥${(total*7.2).toFixed(2)}</b>${moreBtn}
          <div style="margin-top:4px;color:var(--muted)">分析为 OpenRouter 实际扣费；GPU 拆分为估算（带 ≈）</div>
        </div>`;
+    wireObjScroll();
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }
 

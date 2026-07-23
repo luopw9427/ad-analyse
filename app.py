@@ -184,7 +184,18 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
 def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
     _check_token(x_api_token)
-    job_id = db.start_job("analyze", req.project_id, req.batch or "", product=req.product, batch=req.batch or "")
+    # 对象名用该批次的视频名（和拆分一致），而非批次 id
+    ref = req.batch or ""
+    try:
+        if req.batch:
+            pfx = f"projects/{req.project_id}/{req.batch}/"
+            ads = sorted({k[len(pfx):].split("/")[0] for k in r2.list_keys(pfx)
+                          if "/" in k[len(pfx):]})
+            if ads:
+                ref = "、".join(ads)
+    except Exception:
+        pass
+    job_id = db.start_job("analyze", req.project_id, ref, product=req.product, batch=req.batch or "")
     threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
     return {
         "ok": True, "started": True, "job_id": job_id,
