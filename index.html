@@ -75,9 +75,14 @@
 
   .prompt{position:relative;background:var(--panel-2);border:1px solid var(--line);border-radius:10px;
     padding:12px 12px;margin:7px 0;white-space:pre-wrap;font-size:12.5px;line-height:1.6;color:#2c3644}
-  .copy{position:absolute;top:7px;right:7px;padding:3px 9px;font-size:11px;background:#fff;
-    border:1px solid var(--line-2);color:var(--sub);box-shadow:none}
+  .copy{position:absolute;top:6px;right:6px;padding:3px 5px;background:#fff;line-height:0;
+    border:1px solid var(--line-2);color:var(--sub);box-shadow:none;opacity:0;transition:opacity .15s}
+  .prompt:hover .copy{opacity:1}
   .copy:hover{background:var(--accent-weak);color:var(--accent)}
+  .copy.done-ic,.dlbtn.done-ic{color:var(--ok);border-color:#bfe6ca;background:var(--ok-bg);opacity:1}
+  /* 下载图标：默认隐藏，悬停所在卡片/区域才出现 */
+  .dlbtn{opacity:0;transition:opacity .15s;line-height:0}
+  .card:hover .dlbtn,.adcell:hover .dlbtn{opacity:1}
   .muted{color:var(--muted)}
 
   table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -146,13 +151,13 @@
   #scroll{position:fixed;left:0;right:0;top:var(--hdr-h,56px);bottom:0;overflow-y:auto;overflow-x:hidden;transition:right .26s ease}
   body.drawer-open #scroll{right:calc(var(--drawer-w) + 16px)}
   body.drawer-full #scroll{right:0}
-  /* 滚动条：默认透明，悬停时才显现 */
-  #scroll::-webkit-scrollbar,#drawerBody::-webkit-scrollbar,#jobs::-webkit-scrollbar,#opslog::-webkit-scrollbar{width:10px;height:10px}
+  /* 滚动条：默认完全隐藏；仅"正在滚动(.show-sb)"或"鼠标压在滚动条本体上"时才显现 */
+  ::-webkit-scrollbar{width:10px;height:10px}
   ::-webkit-scrollbar-thumb{background:transparent;border-radius:8px}
-  :hover::-webkit-scrollbar-thumb{background:rgba(120,132,150,.30)}
-  ::-webkit-scrollbar-thumb:hover{background:rgba(120,132,150,.55)}
+  ::-webkit-scrollbar-thumb:hover{background:rgba(120,132,150,.6)}      /* 悬停滚动条本体 */
+  .show-sb::-webkit-scrollbar-thumb{background:rgba(120,132,150,.45)}   /* 真实滚动时 */
   *{scrollbar-width:thin;scrollbar-color:transparent transparent}
-  *:hover{scrollbar-color:rgba(120,132,150,.35) transparent}
+  .show-sb{scrollbar-color:rgba(120,132,150,.45) transparent}
   /* 切片悬停操作条 + 小窗播放 */
   .clipcell{position:relative}
   .clipcell .clipbar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;justify-content:center;padding:6px;
@@ -366,8 +371,24 @@ async function doAnalyze(){
 }
 
 // ===== 查看 =====
-function copyBtn(t){const b=document.createElement('button');b.className='copy';b.textContent='复制';b.onclick=()=>{navigator.clipboard.writeText(t);b.textContent='已复制';setTimeout(()=>b.textContent='复制',1200)};return b}
+// 图标（无文字）：复制=重叠圆角矩形，下载=箭头入托盘，完成=勾
+const IC={
+  copy:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></svg>',
+  dl:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M7.5 10l4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>',
+  ok:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>'};
+function markDone(btn){        // 成功后变勾；鼠标离开或 2s 后恢复
+  const o=btn.dataset.ic||btn.innerHTML;btn.dataset.ic=o;btn.innerHTML=IC.ok;btn.classList.add('done-ic');
+  const revert=()=>{btn.innerHTML=o;btn.classList.remove('done-ic');btn.removeEventListener('mouseleave',revert);clearTimeout(tm);};
+  const tm=setTimeout(revert,2000);btn.addEventListener('mouseleave',revert);
+}
+function copyBtn(t){const b=document.createElement('button');b.className='copy';b.title='复制';b.innerHTML=IC.copy;
+  b.dataset.ic=IC.copy;b.onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(t);markDone(b);};return b}
 function promptBlock(t){const d=document.createElement('div');d.className='prompt';d.textContent=t;d.appendChild(copyBtn(t));return d}
+// 滚动条：仅真实滚动时短暂显现
+function wireScrollbars(){
+  ['#scroll','#drawerBody','#jobs','#opslog'].forEach(sel=>{const el=$(sel);if(!el||el._sb)return;el._sb=1;let tmr=null;
+    el.addEventListener('scroll',()=>{el.classList.add('show-sb');clearTimeout(tmr);tmr=setTimeout(()=>el.classList.remove('show-sb'),900);});});
+}
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
 
 let _jobLimit=8;          // 任务列表默认显示条数
@@ -705,8 +726,8 @@ async function toggleFavTask(project,batch,holder,btn){
 function drawerBatch(batch,openTop){
   const bo=_res.batches[batch];const nAds=Object.keys(bo.ads).length;
   const c=document.createElement('div');c.className='card';c.style.position='relative';
-  const dlb=document.createElement('button');dlb.className='mini';dlb.textContent='⬇ 下载整批';
-  dlb.style.cssText='position:absolute;top:14px;right:16px;z-index:1';dlb.onclick=()=>downloadBatch(batch);c.appendChild(dlb);
+  const dlb=document.createElement('button');dlb.className='mini dlbtn';dlb.title='下载整批';dlb.innerHTML=IC.dl;dlb.dataset.ic=IC.dl;
+  dlb.style.cssText='position:absolute;top:14px;right:16px;z-index:1';dlb.onclick=async()=>{await downloadBatch(batch);markDone(dlb);};c.appendChild(dlb);
   const det=document.createElement('details');det.open=!!openTop;det.id='dbatch-'+batch;
   const sm=document.createElement('summary');sm.className='ad-sum';
   sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')+'</span>';
@@ -721,8 +742,8 @@ function drawerBatch(batch,openTop){
 function adBlock(batch,ad){
   const bo=_res.batches[batch],d=bo.ads[ad]||{},agg=d.agg||{},vp=d.vp||{};
   const videos=(bo.vids[ad]||[]).slice().sort();
-  const c=document.createElement('div');c.style.cssText='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;position:relative';
-  const dl=document.createElement('button');dl.className='mini';dl.textContent='⬇ 下载';dl.style.cssText='position:absolute;top:12px;right:14px;z-index:1';dl.onclick=()=>downloadAd(batch,ad);c.appendChild(dl);
+  const c=document.createElement('div');c.className='adcell';c.style.cssText='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;position:relative';
+  const dl=document.createElement('button');dl.className='mini dlbtn';dl.title='下载该广告';dl.innerHTML=IC.dl;dl.dataset.ic=IC.dl;dl.style.cssText='position:absolute;top:12px;right:14px;z-index:1';dl.onclick=async()=>{await downloadAd(batch,ad);markDone(dl);};c.appendChild(dl);
   const det=document.createElement('details');det.open=true;
   const sm=document.createElement('summary');sm.className='ad-sum';
   sm.innerHTML='<b>'+ad+'</b> <span class="muted" style="font-weight:400">'+videos.length+' 切片'
@@ -754,7 +775,7 @@ function updTab(){   // 高亮当前视图图标 + 全屏图标状态
   const a=$('#dic-all'),f=$('#dic-fav'),fu=$('#dic-full');
   if(a)a.classList.toggle('on',_drawerMode==='all');
   if(f)f.classList.toggle('on',_drawerMode==='fav');
-  if(fu){fu.textContent=_drawerFull?'↙':'⛶';fu.title=_drawerFull?'退出全屏':'全屏';}
+  if(fu){fu.textContent=_drawerFull?'↘':'⛶';fu.title=_drawerFull?'退出全屏':'全屏';}
 }
 function updEdgeTabs(){updTab();}
 function openDrawer(){
@@ -772,6 +793,7 @@ function toggleDrawerFull(){
 }
 function wireDrawer(){
   measureHdr();window.addEventListener('resize',measureHdr);
+  wireScrollbars();
   updTab();
   const grip=$('#drawerGrip');
   if(grip){
@@ -1011,7 +1033,7 @@ function renderAdDetail(batch,ad,d,videos){
       const v=document.createElement('video');v.src=u;v.preload='metadata';cell.appendChild(v);
       const barc=document.createElement('div');barc.className='clipbar';
       const pb=document.createElement('button');pb.textContent='▶ 播放';pb.onclick=()=>openClip(u);
-      const db=document.createElement('button');db.textContent='⬇ 下载';db.onclick=()=>downloadClip(u);
+      const db=document.createElement('button');db.title='下载切片';db.innerHTML=IC.dl;db.dataset.ic=IC.dl;db.onclick=()=>{downloadClip(u);markDone(db);};
       barc.appendChild(pb);barc.appendChild(db);cell.appendChild(barc);
       w.appendChild(cell);});
     det.appendChild(w);frag.appendChild(det);
@@ -1036,8 +1058,8 @@ function renderCommon(v,batch){
   const list=v.共性镜头prompt列表||[];
   c.style.position='relative';
   c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 本批次归纳）</span></h2>';
-  const dc=document.createElement('button');dc.className='mini';dc.textContent='⬇ 下载共性(json)';
-  dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');c.appendChild(dc);
+  const dc=document.createElement('button');dc.className='mini dlbtn';dc.title='下载共性(json)';dc.innerHTML=IC.dl;dc.dataset.ic=IC.dl;
+  dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>{downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');markDone(dc);};c.appendChild(dc);
   c.appendChild(buildCommonBody(v,{project:proj(),batch:batch,ad:'common'}));   // 每条共性prompt自带中/EN与收藏
   return c;
 }
