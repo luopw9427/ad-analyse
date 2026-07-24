@@ -628,8 +628,10 @@ function favRow(f){
   if(f.kind==='task'){
     t.textContent='['+(m.jobKind||'任务')+'] '+(f.label||m.batch||'');row.appendChild(t);
     const sub=document.createElement('div');sub.className='muted';sub.style.fontSize='12px';sub.textContent='批次 '+(m.batch||'-')+' · 项目 '+(m.project||'-');row.appendChild(sub);
-    const btn=document.createElement('button');btn.className='mini';btn.textContent='查看该批次';btn.style.marginTop='8px';
-    btn.onclick=()=>favOpenTask(m.project,m.batch);row.appendChild(btn);
+    const btn=document.createElement('button');btn.className='mini';btn.textContent='展开该批次';btn.style.marginTop='8px';
+    const holder=document.createElement('div');holder.style.marginTop='10px';
+    btn.onclick=()=>toggleFavTask(m.project,m.batch,holder,btn);
+    row.appendChild(btn);row.appendChild(holder);
   }else if(f.kind==='clip'){
     t.textContent=f.label||m.name||'切片';row.appendChild(t);
     if(m.url){const v=document.createElement('video');v.src=m.url;v.controls=true;v.preload='metadata';v.style.cssText='width:100%;max-width:280px;border-radius:8px;margin-top:4px';row.appendChild(v);
@@ -641,11 +643,15 @@ function favRow(f){
   }
   return row;
 }
-async function favOpenTask(project,batch){
+// 在收藏栏里就地展开/收起该任务批次的完整内容（不跳转到全部结果）
+async function toggleFavTask(project,batch,holder,btn){
+  if(holder.firstChild){holder.innerHTML='';btn.textContent='展开该批次';return;}
+  btn.textContent='加载中…';
   if(project&&project!==proj()){$('#project').value=project;_res=null;}
-  _drawerMode='all';
-  if(!_res)await ensureResult(true);
-  renderDrawer();focusBatch(batch);
+  if(!_res||!_res.batches||!_res.batches[batch])await ensureResult(true);
+  if(!_res||!_res.batches||!_res.batches[batch]){
+    holder.innerHTML='<div class="muted" style="padding:6px">该批次已删除或不存在</div>';btn.textContent='收起';return;}
+  holder.innerHTML='';holder.appendChild(drawerBatch(batch,true));btn.textContent='收起';
 }
 function drawerBatch(batch,openTop){
   const bo=_res.batches[batch];const nAds=Object.keys(bo.ads).length;
