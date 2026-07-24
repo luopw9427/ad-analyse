@@ -18,8 +18,9 @@
   }
 :root{--drawer-w:50vw}
   *{box-sizing:border-box}
-  body{margin:0;background:linear-gradient(180deg,#eef2f8,#e9eef6);color:var(--ink);
+  body{margin:0;background:#e4e9f2;color:var(--ink);
        font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+  #scroll{background:#e4e9f2}
 
   header{padding:14px 28px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
          border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -35,16 +36,16 @@
 
   button{background:#fff;border:1px solid var(--line-2);color:var(--ink);padding:8px 16px;border-radius:var(--r-sm);
     cursor:pointer;font-size:13px;font-weight:600;transition:.15s;box-shadow:var(--sh-sm)}
-  button:hover{background:var(--panel-2)}
+  button:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
   button:disabled{opacity:.5;cursor:not-allowed;box-shadow:none}
   .iconbtn{background:transparent;border:0;box-shadow:none;color:var(--sub);padding:5px 7px;font-size:15px;
     line-height:1;border-radius:7px;font-weight:400}
-  .iconbtn:hover{background:var(--panel-2);color:var(--ink)}
-  .iconbtn.on{background:var(--panel-2);color:var(--ink)}
+  .iconbtn:hover{background:var(--accent-weak);color:var(--accent)}
+  .iconbtn.on{background:var(--accent-weak);color:var(--accent)}
   button.ghost{background:#fff;border:1px solid var(--line-2);color:var(--sub);font-weight:500;box-shadow:none}
-  button.ghost:hover{background:var(--panel-2);border-color:var(--accent);color:var(--accent)}
+  button.ghost:hover{background:var(--accent-weak);border-color:var(--accent);color:var(--accent)}
   button.eye{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:6px 9px;font-size:13px;box-shadow:none}
-  button.eye:hover{background:var(--panel-2)}
+  button.eye:hover{background:var(--accent-weak);color:var(--accent);border-color:var(--accent)}
   button.mini{padding:3px 10px;font-size:11.5px;background:var(--panel-2);color:var(--sub);
     border:1px solid var(--line-2);margin-right:5px;font-weight:500;box-shadow:none}
   button.mini:hover{background:var(--accent-weak);border-color:var(--accent);color:var(--accent)}
@@ -574,10 +575,7 @@ function adFromKey(k,pid){const rest=k.replace('projects/'+pid+'/','');const p=r
 
 async function loadAll(){
   remember();setStatus('加载中…');await loadFavs();await loadJobs();
-  _res=null;
-  await ensureResult(true);
-  renderDrawer();
-  $('#results').innerHTML='<div class="muted" style="padding:6px">点任务列表某条的「查看」在此显示其详情；把鼠标移到屏幕最右侧可查看全部结果。</div>';
+  await loadResultsProgressive();   // 逐批次渐进显示，不必等全部加载
 }
 
 // 拉取并解析 /result，按「批次」分组缓存到 _res
@@ -589,14 +587,11 @@ function parseKey(k,pid){
   // projects/{pid}/{batch}/{ad}/... → depth>=3
   return {batch:parts[0], ad:(parts.length>=3?parts[1]:null), last:parts[parts.length-1]};
 }
-async function ensureResult(force){
-  if(_res&&!force)return _res;
-  let data;try{data=await api('/result?project_id='+encodeURIComponent(proj()))}
-  catch(e){_res=null;
-    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该项目不存在或暂无产物</div>';renderDrawer();}
-    else setStatus('加载失败：'+e.message);
-    return null;}
-  const pid=proj();const batches={};
+// 把一次 /result 响应合并进 _res.batches（可多次调用做增量填充）
+function _mergeResult(data){
+  const pid=proj();
+  if(!_res)_res={batches:{},count:0};
+  const batches=_res.batches;
   const B=b=>batches[b]||(batches[b]={ads:{},vids:{},common:null});
   for(const [k,v] of Object.entries(data.reports||{})){
     const info=parseKey(k,pid);if(!info)continue;
@@ -612,10 +607,38 @@ async function ensureResult(force){
     else if(k.endsWith('shot_prompts.json'))A.sp=v;
     else if(k.endsWith('source.json'))A.source=(v&&v.url)||'';
   }
-  (data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const info=parseKey(o.key,pid);if(info&&info.ad){const bo=B(info.batch);if(!bo.ads[info.ad])bo.ads[info.ad]={};(bo.vids[info.ad]=bo.vids[info.ad]||[]).push(o.url)}}});
-  _res={batches,count:data.count};
-  setStatus('共 '+data.count+' 个对象 · '+Object.keys(batches).length+' 个批次');
+  (data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const info=parseKey(o.key,pid);if(info&&info.ad){const bo=B(info.batch);if(!bo.ads[info.ad])bo.ads[info.ad]={};(bo.vids[info.ad]=bo.vids[info.ad]||[]);if(!bo.vids[info.ad].includes(o.url))bo.vids[info.ad].push(o.url)}}});
+  if(data.count)_res.count=Math.max(_res.count||0,data.count);
+}
+async function ensureResult(force){
+  if(_res&&!force)return _res;
+  let data;try{data=await api('/result?project_id='+encodeURIComponent(proj()))}
+  catch(e){_res=null;
+    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该项目不存在或暂无产物</div>';renderDrawer();}
+    else setStatus('加载失败：'+e.message);
+    return null;}
+  _res={batches:{},count:data.count};_mergeResult(data);
+  setStatus('共 '+_res.count+' 个对象 · '+Object.keys(_res.batches).length+' 个批次');
   return _res;
+}
+// 渐进加载：先出骨架（批次+切片），再逐批次拉内容，每拉完一批就刷新显示
+async function loadResultsProgressive(){
+  _res=null;
+  let list;
+  try{list=await api('/result?include_content=false&project_id='+encodeURIComponent(proj()))}
+  catch(e){
+    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');_res=null;_drawerMode='all';renderDrawer();return;}
+    setStatus('加载失败：'+e.message);return;}
+  _res={batches:{},count:list.count};_mergeResult(list);
+  _drawerMode='all';renderDrawer();               // 立即显示批次骨架+切片
+  const bs=Object.keys(_res.batches).sort().reverse();  // 新批次先出
+  let done=0;
+  for(const b of bs){
+    try{const bd=await api('/result?project_id='+encodeURIComponent(proj())+'&batch='+encodeURIComponent(b));
+      _mergeResult(bd);}catch(e){}
+    done++;setStatus('已加载 '+done+'/'+bs.length+' 批次…');renderDrawer();
+  }
+  setStatus('共 '+_res.count+' 个对象 · '+bs.length+' 个批次');
 }
 
 // 右侧抽屉：按批次分组展示全部结果

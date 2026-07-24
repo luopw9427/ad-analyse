@@ -493,11 +493,11 @@ def split(project_id: str = Form(...),
 
 
 @app.get("/result")
-def result(project_id: str, include_content: bool = True,
+def result(project_id: str, include_content: bool = True, batch: str = "",
            x_api_token: str = Header(default="")):
     _check_token(x_api_token)
 
-    prefix = f"projects/{project_id}/"
+    prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
     keys = r2.list_keys(prefix)
     if not keys:
         raise HTTPException(status_code=404, detail=f"{prefix} 下没有任何产物")
