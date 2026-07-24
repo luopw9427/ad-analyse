@@ -384,10 +384,21 @@ function markDone(btn){        // 成功后变勾；鼠标离开或 2s 后恢复
 function copyBtn(t){const b=document.createElement('button');b.className='copy';b.title='复制';b.innerHTML=IC.copy;
   b.dataset.ic=IC.copy;b.onclick=e=>{e.stopPropagation();navigator.clipboard.writeText(t);markDone(b);};return b}
 function promptBlock(t){const d=document.createElement('div');d.className='prompt';d.textContent=t;d.appendChild(copyBtn(t));return d}
-// 滚动条：仅真实滚动时短暂显现
+// 滚动条：真实滚动时显现；鼠标移到滚动条边缘带时显现并一直保持，移走才隐藏
 function wireScrollbars(){
   ['#scroll','#drawerBody','#jobs','#opslog'].forEach(sel=>{const el=$(sel);if(!el||el._sb)return;el._sb=1;let tmr=null;
-    el.addEventListener('scroll',()=>{el.classList.add('show-sb');clearTimeout(tmr);tmr=setTimeout(()=>el.classList.remove('show-sb'),900);});});
+    const show=()=>el.classList.add('show-sb');
+    const hideSoon=(ms)=>{clearTimeout(tmr);tmr=setTimeout(()=>el.classList.remove('show-sb'),ms||700);};
+    el.addEventListener('scroll',()=>{show();hideSoon(900);});
+    el.addEventListener('mousemove',e=>{
+      const r=el.getBoundingClientRect();
+      const nearV=(el.scrollHeight>el.clientHeight+2)&&(r.right-e.clientX)<=16&&(r.right-e.clientX)>=-2;
+      const nearH=(el.scrollWidth>el.clientWidth+2)&&(r.bottom-e.clientY)<=16&&(r.bottom-e.clientY)>=-2;
+      if(nearV||nearH){clearTimeout(tmr);show();}   // 停在滚动条带上就保持显示
+      else hideSoon();
+    });
+    el.addEventListener('mouseleave',()=>hideSoon());
+  });
 }
 function tags(a,cls){const w=document.createElement('div');w.className='tags';(a||[]).forEach(t=>{const s=document.createElement('span');s.className='tag'+(cls?' '+cls:'');s.textContent=t;w.appendChild(s)});return w}
 
