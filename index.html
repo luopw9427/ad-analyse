@@ -508,6 +508,7 @@ function wireObjScroll(){
       setTimeout(()=>{inner.style.display=''},300)};
   });
 }
+function kindLabel(k){return {split:'拆分',analyze:'分析',translate:'翻译',prompt_edit:'提示词修改'}[k]||k||'';}
 async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
@@ -519,7 +520,7 @@ async function loadJobs(){
       const fmeta={project:j.project_id,batch:(j.batch||''),jobKind:j.kind,label:objName};
       const fon=_favSet.has(fref)?' on':'';const fstar=_favSet.has(fref)?'★':'☆';
       const slot=`<button class="fav-star${fon}" type="button" data-ref="${fref.replace(/"/g,'&quot;')}" data-kind="task" data-label="${(objName||'').replace(/"/g,'&quot;')}" data-meta='${JSON.stringify(fmeta).replace(/'/g,"&#39;")}' title="收藏/取消收藏">${fstar}</button>`;
-      h+=`<tr><td>${j.id}</td><td>${j.kind}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
+      h+=`<tr><td>${j.id}</td><td>${kindLabel(j.kind)}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -759,7 +760,7 @@ async function downloadAd(batch,ad){
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
 }
 
-// 详情内容（每个片段可单独收起）。ctx 给了则加 ⭐ 收藏
+// 详情内容（每个片段可单独收起）。ctx 给了则加 ⭐ 收藏；zh 面板加"修改"编辑区
 function promptItem(it,ctx){
   const d=document.createElement('details');d.open=true;d.className='pi';
   const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');
@@ -769,7 +770,58 @@ function promptItem(it,ctx){
     sm.appendChild(favStar('prompt',ref,title,meta));}
   d.appendChild(sm);
   d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
+  if(ctx&&ctx.lang==='zh'&&(ctx.ptype==='shot'||ctx.ptype==='common'))
+    d.appendChild(reviseEditor(ctx.ptype,ctx,it.卖点||[]));
   return d;
+}
+
+// 提示词修改编辑区：镜头/共性=改卖点+修改需求；视频级=只修改需求
+function reviseEditor(ptype,ctx,curSelling){
+  const wrap=document.createElement('div');wrap.style.cssText='margin-top:8px;border-top:1px dashed var(--line);padding-top:8px';
+  const toggle=document.createElement('button');toggle.className='mini';toggle.textContent='✎ 修改';
+  const body=document.createElement('div');body.style.cssText='display:none;margin-top:8px';
+  toggle.onclick=()=>{body.style.display=(body.style.display==='none'?'':'none');};
+  let sellingInput=null;
+  if(ptype==='shot'||ptype==='common'){
+    const lab=document.createElement('div');lab.className='muted';lab.style.fontSize='12px';lab.textContent='卖点（逗号分隔，直接修改后按此重写）：';
+    sellingInput=document.createElement('input');sellingInput.type='text';sellingInput.value=(curSelling||[]).join('，');
+    sellingInput.style.cssText='width:100%;margin:4px 0 8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px';
+    body.appendChild(lab);body.appendChild(sellingInput);
+  }
+  const lab2=document.createElement('div');lab2.className='muted';lab2.style.fontSize='12px';lab2.textContent='其余修改需求（可空）：';
+  const ta=document.createElement('textarea');ta.rows=2;ta.placeholder='例如：改成俯拍、加强微距特写、时长压到2秒…';
+  ta.style.cssText='width:100%;margin:4px 0 8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;font-size:13px';
+  body.appendChild(lab2);body.appendChild(ta);
+  const btn=document.createElement('button');btn.className='mini';btn.style.cssText='background:var(--accent);color:#fff';btn.textContent='应用修改';
+  btn.onclick=()=>doRevise(ptype,ctx,sellingInput,ta,btn);
+  body.appendChild(btn);
+  const note=document.createElement('div');note.className='muted';note.style.cssText='font-size:11px;margin-top:6px';note.textContent='将调用 Gemini 重写并翻译，作为一个「提示词修改」任务，完成后自动刷新。';
+  body.appendChild(note);
+  wrap.appendChild(toggle);wrap.appendChild(body);return wrap;
+}
+async function doRevise(ptype,ctx,sellingInput,ta,btn){
+  if(!tok()){alert('先填访问口令');return}
+  const instruction=(ta.value||'').trim();
+  let selling=null;
+  if(sellingInput){selling=sellingInput.value.split(/[，,、]/).map(s=>s.trim()).filter(Boolean);}
+  if(!instruction&&(!selling||!selling.length)){alert('请填写新卖点或修改需求');return}
+  btn.disabled=true;btn.textContent='提交中…';
+  const body={project_id:proj(),batch:ctx.batch||'',ad:(ptype==='common'?'':(ctx.ad||'')),ptype:ptype,
+    idx:(ctx.idx!=null?ctx.idx:null),selling:selling,instruction:instruction,
+    product:$('#product').value.trim()||'',
+    openrouter_key:$('#orkey').value.trim()||null,deepseek_key:$('#dskey').value.trim()||null,
+    custom_prompts:(()=>{try{const o=JSON.parse(localStorage.getItem('customPrompts')||'{}');return Object.keys(o).length?o:null}catch(e){return null}})()};
+  try{
+    const r=await fetch('/prompt/revise',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    if(!d.started){alert('提交失败 '+(d.detail||r.status));btn.disabled=false;btn.textContent='应用修改';return}
+    logOps('▶ 提示词修改任务 #'+d.job_id+' 处理中…');
+    const job=await waitJob(d.job_id);
+    logOps((job.ok?'✓':'✗')+' 提示词修改：'+(job.detail||''));
+    if(job.ok){const m=_drawerMode;await ensureResult(true);_drawerMode=m;renderDrawer();}
+    else alert('修改失败：'+(job.detail||''));
+  }catch(e){alert('修改失败：'+e.message);}
+  btn.disabled=false;btn.textContent='应用修改';
 }
 // ===== 中英双语块：中/英 tab；英文未就绪显示"正在翻译中"，翻译完自动填充 =====
 let _enReg={};          // enId -> {get, render, pane}
@@ -820,7 +872,9 @@ function buildVpBox(vp,ctx){
     const meta={project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:'video',lang:ctx.lang,title:'视频级脚本 prompt',text:vp.video_prompt_text||''};
     sm.appendChild(favStar('prompt',ref,'视频级脚本 prompt',meta));}
   det.appendChild(sm);
-  det.appendChild(promptBlock(vp.video_prompt_text||''));return det;
+  det.appendChild(promptBlock(vp.video_prompt_text||''));
+  if(ctx&&ctx.lang==='zh')det.appendChild(reviseEditor('video',ctx,null));
+  return det;
 }
 function buildSpBox(sp,ctx){
   const list=((sp||{}).镜头级prompt列表)||[];const det=document.createElement('details');det.open=true;

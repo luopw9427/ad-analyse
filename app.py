@@ -40,6 +40,7 @@ from pydantic import BaseModel
 import r2_storage as r2
 import db
 import translator
+import reviser
 
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
@@ -692,3 +693,135 @@ def fav_login(req: FavAuthReq, x_api_token: str = Header(default="")):
     if not db.fav_login(req.username.strip(), req.pin):
         raise HTTPException(status_code=401, detail="用户名或口令错误")
     return {"ok": True, "username": req.username.strip()}
+
+
+# ── 提示词修改（Gemini 重写 + 翻译，合为一个 prompt_edit 任务）─────────
+class ReviseReq(BaseModel):
+    project_id: str
+    batch: str = ""
+    ad: str = ""                       # shot / video 需要；common 不填
+    ptype: str                         # shot / common / video
+    idx: Optional[int] = None          # shot / common 的条目下标
+    selling: Optional[List[str]] = None  # 直接修改的新卖点（shot/common）
+    instruction: Optional[str] = ""    # 修改需求（间接）
+    product: Optional[str] = ""
+    openrouter_key: Optional[str] = None
+    deepseek_key: Optional[str] = None
+    custom_prompts: Optional[dict] = None
+
+
+def _find_key(prefix: str, suffix: str) -> Optional[str]:
+    for k in r2.list_keys(prefix):
+        if k.endswith(suffix) and not (suffix == "共性镜头prompt.json" and k.endswith(".en.json")):
+            return k
+    return None
+
+
+def _run_revise_bg(req: "ReviseReq", job_id):
+    t0 = time.time()
+    try:
+        pid, batch, ad, ptype, idx = req.project_id, req.batch or "", req.ad or "", req.ptype, req.idx
+        or_key = req.openrouter_key or os.environ.get("OPENROUTER_API_KEY", "")
+        ds_key = req.deepseek_key or DEEPSEEK_API_KEY
+
+        # 1. 定位 zh json
+        if ptype == "common":
+            key_zh = _find_key(f"projects/{pid}/{batch}/", "共性镜头prompt.json")
+            list_field = "共性镜头prompt列表"
+        elif ptype == "shot":
+            key_zh = _find_key(f"projects/{pid}/{batch}/{ad}/", "shot_prompts.json")
+            list_field = "镜头级prompt列表"
+        elif ptype == "video":
+            key_zh = _find_key(f"projects/{pid}/{batch}/{ad}/", "video_prompt.json")
+            list_field = None
+        else:
+            raise RuntimeError(f"未知 ptype: {ptype}")
+        if not key_zh:
+            raise RuntimeError("在 R2 找不到对应的提示词文件")
+        data = r2.read_json(key_zh)
+
+        # 2. 取当前条目内容
+        if list_field:
+            lst = data.get(list_field) or []
+            if idx is None or idx < 0 or idx >= len(lst):
+                raise RuntimeError(f"条目下标越界: {idx}")
+            item = lst[idx]
+            current = item.get("prompt", "")
+            old_selling = item.get("卖点", []) or []
+        else:
+            current = data.get("video_prompt_text", "")
+            old_selling = []
+
+        # 3. Gemini 重写
+        rev, or_cost, tin, tout = reviser.revise(
+            current, req.product or data.get("产品名", ""), ptype,
+            old_selling, req.selling, req.instruction or "", api_key=or_key)
+        revised = rev.get("revised_prompt", "").strip()
+        if not revised:
+            raise RuntimeError("重写结果为空")
+        # 最终卖点：直接改卖点优先；否则用 Gemini 返回的；再否则保持原样
+        final_selling = (req.selling if req.selling is not None
+                         else (rev.get("卖点") or old_selling))
+
+        # 4. 写回 zh
+        if list_field:
+            if ptype in ("shot", "common"):
+                item["卖点"] = final_selling
+            item["prompt"] = revised
+            lst[idx] = item
+            data[list_field] = lst
+        else:
+            data["video_prompt_text"] = revised
+        r2.upload_json(key_zh, data)
+
+        # 5. 翻译并 patch .en.json
+        ds_in = ds_out = 0
+        if ds_key:
+            try:
+                instr = translator.pick_instr((req.custom_prompts or {}).get("translate"))
+                ds_client = translator._client(ds_key)
+                key_en = key_zh[:-len(".json")] + ".en.json"
+                try:
+                    en_data = r2.read_json(key_en)
+                except Exception:
+                    en_data = json.loads(json.dumps(data, ensure_ascii=False))  # 无则以 zh 为底
+                if list_field:
+                    sub = {k: item[k] for k in ("标题", "卖点", "prompt") if k in item}
+                    en_sub, di, do = translator.translate_obj(sub, instr, ds_client)
+                    ds_in += di; ds_out += do
+                    en_lst = en_data.get(list_field) or []
+                    while len(en_lst) <= idx:
+                        en_lst.append({})
+                    base = dict(en_lst[idx] or {})
+                    base.update(en_sub or {})
+                    en_lst[idx] = base
+                    en_data[list_field] = en_lst
+                else:
+                    en_sub, di, do = translator.translate_obj(
+                        {"video_prompt_text": revised}, instr, ds_client)
+                    ds_in += di; ds_out += do
+                    if en_sub:
+                        en_data["video_prompt_text"] = en_sub.get("video_prompt_text", revised)
+                r2.upload_json(key_en, en_data)
+            except Exception as e:
+                print(f"[revise] 翻译失败（不影响中文修改）: {e}")
+
+        cost = or_cost + translator.cost_of(ds_in, ds_out)
+        where = f"{ad or '共性'}" + (f" #{idx}" if idx is not None else "")
+        db.finish_job(job_id, True, f"projects/{pid}/{batch}/",
+                      f"已修改 {reviser.PTYPE_LABEL.get(ptype, ptype)}（{where}）并翻译",
+                      time.time() - t0, cost_usd=cost,
+                      tokens_in=tin + ds_in, tokens_out=tout + ds_out, cost_exact=False)
+    except Exception as e:
+        db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+@app.post("/prompt/revise")
+def prompt_revise(req: ReviseReq, x_api_token: str = Header(default="")):
+    _check_token(x_api_token)
+    if req.ptype not in ("shot", "common", "video"):
+        raise HTTPException(status_code=400, detail="ptype 必须为 shot/common/video")
+    ref = f"{req.ad or '共性'}" + (f"#{req.idx}" if req.idx is not None else "")
+    job_id = db.start_job("prompt_edit", req.project_id, ref, batch=req.batch or "")
+    threading.Thread(target=_run_revise_bg, args=(req, job_id), daemon=True).start()
+    return {"ok": True, "started": True, "job_id": job_id}
