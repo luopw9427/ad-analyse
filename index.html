@@ -844,7 +844,15 @@ function wirePip(){
     pip.style.left=l+'px';pip.style.top=t+'px';});
   window.addEventListener('mouseup',()=>drag=false);
 }
-function downloadClip(u){const a=document.createElement('a');a.href=u;a.download=(u.split('/').pop()||'clip').split('?')[0];a.target='_blank';document.body.appendChild(a);a.click();a.remove();}
+async function downloadClip(u,name){
+  const nm=name||(u.split('/').pop()||'clip').split('?')[0];
+  try{
+    const r=await fetch('/download_file?url='+encodeURIComponent(u)+'&name='+encodeURIComponent(nm),{headers:headers()});
+    if(!r.ok)throw new Error(r.status);
+    const b=await r.blob();const url=URL.createObjectURL(b);
+    const a=document.createElement('a');a.href=url;a.download=nm;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+  }catch(e){window.open(u,'_blank');}   // 兜底：仍打不动就新标签打开
+}
 
 // 打包下载该广告全部产物
 function downloadObj(obj,filename){
@@ -1088,7 +1096,8 @@ function renderAdDetail(batch,ad,d,videos){
       const v=document.createElement('video');v.src=u;v.preload='metadata';cell.appendChild(v);
       const barc=document.createElement('div');barc.className='clipbar';
       const pb=document.createElement('button');pb.title='播放';pb.textContent='▶';pb.onclick=()=>openClip(u);
-      const db=document.createElement('button');db.title='下载切片';db.innerHTML=IC.dl;db.dataset.ic=IC.dl;db.onclick=()=>{downloadClip(u);markDone(db);};
+      const _cn=(()=>{const f=(u.split('/').pop()||'').split('?')[0];const m=/shot[_-]?(\d+)\.mp4/i.exec(f);const n=m?('_镜头'+String(parseInt(m[1],10)+1).padStart(3,'0')):'';return batch+'_'+ad+n+'.mp4';})();
+      const db=document.createElement('button');db.title='下载切片';db.innerHTML=IC.dl;db.dataset.ic=IC.dl;db.onclick=async()=>{await downloadClip(u,_cn);markDone(db);};
       barc.appendChild(pb);barc.appendChild(db);cell.appendChild(barc);
       w.appendChild(cell);});
     det.appendChild(w);frag.appendChild(det);

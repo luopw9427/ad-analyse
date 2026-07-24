@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional, List
 
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 import zipfile
 from pydantic import BaseModel
@@ -653,6 +653,29 @@ def jobs_delete(req: JobDeleteReq, x_api_token: str = Header(default="")):
     """删除单条任务记录（不动 R2 文件）。"""
     _check_token(x_api_token)
     return {"ok": True, "deleted": db.delete_job(req.job_id)}
+
+
+@app.get("/download_file")
+def download_file(url: str, name: str = "", x_api_token: str = Header(default="")):
+    """把 R2 公开文件以附件形式流式返回，强制浏览器下载（避免跨域直链变成在线播放）。"""
+    _check_token(x_api_token)
+    base = getattr(r2, "PUBLIC_URL", "") or ""
+    if not (url.startswith("https://") and (".r2.dev/" in url or (base and url.startswith(base)))):
+        raise HTTPException(status_code=400, detail="非法下载地址")
+    import requests
+    from urllib.parse import quote
+    try:
+        rr = requests.get(url, stream=True, timeout=600)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"取文件失败: {e}")
+    if rr.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"源返回 {rr.status_code}")
+    fname = name or (url.split("/")[-1].split("?")[0]) or "download"
+    return StreamingResponse(
+        rr.iter_content(65536),
+        media_type=rr.headers.get("content-type", "application/octet-stream"),
+        headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(fname)},
+    )
 
 
 # ── 个人收藏 ─────────────────────────────────────────────────────
