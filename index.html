@@ -18,9 +18,9 @@
   }
 :root{--drawer-w:50vw}
   *{box-sizing:border-box}
-  body{margin:0;background:#e4e9f2;color:var(--ink);
+  body{margin:0;background:#edf1f7;color:var(--ink);
        font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
-  #scroll{background:#e4e9f2}
+  #scroll{background:#edf1f7}
 
   header{padding:14px 28px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
          border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;
@@ -279,7 +279,6 @@ $('#project').value=localStorage.getItem('proj')||'test';
 $('#product').value=localStorage.getItem('prod')||'';
 $('#hyp').value=localStorage.getItem('hyp')||'';
 $('#engine').value=localStorage.getItem('eng')||'gpu';
-wireDrawer();
 $('#orkey').value=localStorage.getItem('ork')||'';
 $('#dskey').value=localStorage.getItem('dsk')||'';
 function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim());localStorage.setItem('dsk',$('#dskey').value.trim())}
@@ -1043,8 +1042,8 @@ function renderCommon(v,batch){
   return c;
 }
 
-// 初始化：默认打开结果栏（放在所有声明之后，避免 TDZ）
-measureHdr();_drawerMode='all';renderDrawer();openDrawer();
+// 初始化：放在所有声明之后，避免 TDZ（wireDrawer 内含 measureHdr）
+wireDrawer();_drawerMode='all';renderDrawer();openDrawer();
 </script>
 </body>
 </html>
