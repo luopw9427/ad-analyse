@@ -42,6 +42,8 @@ from video_prompt_generator import _make_client, _repair_llm_json
 
 class 镜头级Prompt(BaseModel):
     id: str = Field(description="sp_01, sp_02, ...")
+    序号: int = Field(default=0, description="对应原视频第几个镜头，从 1 开始，与镜头列表顺序一致")
+    shot_id: str = Field(default="", description="对应原始镜头 id，如 shot_000（用于关联切片）")
     标题: str = Field(description="4-8 字概括，如 '拆袋绽放特写'、'门廊定格'")
     卖点: List[str] = Field(default_factory=list, description="1-3 个短标签")
     痛点: List[str] = Field(default_factory=list, description="0-3 个短标签")
@@ -54,7 +56,7 @@ class ShotPromptLibrary(BaseModel):
     ad_id: str
     产品名: str
     source_video_prompt: str = Field(description="来源 video_prompt.json 的相对路径")
-    镜头级prompt列表: List[镜头级Prompt] = Field(min_length=7)
+    镜头级prompt列表: List[镜头级Prompt] = Field(default_factory=list)
 
 
 # ============================================================
@@ -63,8 +65,10 @@ class ShotPromptLibrary(BaseModel):
 
 PROMPT = """你是资深广告分镜师兼 AI 视频生成 prompt 工程师。
 
-【任务】基于以下广告的完整分析，产出至少 {min_count} 条**独立可用**的镜头级 prompt 素材。
-每条都可以单独投喂给 AI 视频生成模型（Sora / 可灵 / 智谱清言）生成一个完整视频镜头。
+【任务】基于以下广告的完整分析，为原视频的**每一个镜头各生成一条**独立可用的镜头级 prompt。
+每条都可以单独投喂给 AI 视频生成模型（Sora / 可灵 / 智谱清言）生成对应的那个视频镜头。
+⚠️ **数量必须严格等于原视频的镜头数 {min_count}**，顺序与下方 video_prompt.json 的「镜头列表」完全一致，
+一一对应，不多不少；每条都要带上它对应镜头的「序号」和「shot_id」。
 
 ═══ 输入：广告的 video_prompt.json ═══
 
@@ -74,17 +78,14 @@ PROMPT = """你是资深广告分镜师兼 AI 视频生成 prompt 工程师。
 
 【任务要求】
 
-1. **数量**：至少 {min_count} 条（可以更多）
+1. **数量与对应**：严格 {min_count} 条，与「镜头列表」逐个对应（第 i 条 = 第 i 个镜头）。
+   每条填对应镜头的「序号」「shot_id」；镜头段的时段/动作/产品呈现要忠实还原该镜头的分析内容，
+   不要凭空新增原视频没有的镜头，也不要合并或跳过镜头。
 
-2. **来源策略**：
-   - 部分来自原广告镜头的**提取**（把原广告的某个镜头独立成完整 prompt）
-   - 部分来自**扩充**（围绕某个卖点/痛点/展示方式，设计原广告没有但符合调性的新镜头）
-   - 覆盖所有主要卖点和痛点
-
-   ⚠️ **每条镜头 prompt 必须紧扣它的卖点**（卖点从上面输入里已提取的商品卖点/解决痛点中选取，
-   不要凭空编造与产品无关的卖点）：镜头段的**主体动作、产品呈现、景别与特写**必须直接把这条
-   卖点"演"出来、让观众一眼看到——例如卖点是"仿真立体"就给贴片凸起的微距特写，卖点是"操作简便"
-   就给一次完整轻松的操作动作。结构化字段里的「卖点」要与这段镜头实际体现的卖点一致。
+2. **卖点对应**：⚠️ **每条镜头 prompt 必须紧扣它对应镜头的卖点**（卖点取自该镜头「主要卖点/配合卖点」
+   及广告已提取的商品卖点/解决痛点，不要凭空编造与产品无关的卖点）：镜头段的**主体动作、产品呈现、
+   景别与特写**必须直接把这条卖点"演"出来——例如卖点是"仿真立体"就给贴片凸起的微距特写，卖点是
+   "操作简便"就给一次完整轻松的操作动作。结构化字段里的「卖点」要与这段镜头实际体现的卖点一致。
 
 3. **每条 prompt 的结构**（严格模板 —— **两段式，用换行分隔**，不要引入子分段）：
 
@@ -150,17 +151,13 @@ PROMPT = """你是资深广告分镜师兼 AI 视频生成 prompt 工程师。
    （"宁静氛围""和谐有层次""珍视"）、对参考图内容的重复复述（改为"与图片X一致"）、
    冗余主语定语（"女性的右手食指指腹"→"指腹"、"展示作品的精细工艺和材质"→"工艺和材质精细"）。
 
-4. **每条 prompt 围绕不同角度**：
-   - 微距材质特写（展示仿真度）
-   - 场景应用（展示使用后效果）
-   - 开箱/拆袋（展示便捷性）
-   - 对比展示（展示体量、颜色多样）
-   - 挂载/摆放动作（展示无需组装）
-   - 生活代入场景（展示情感价值）
-   - 定格终镜（展示最终氛围）
+4. **逐镜头忠实还原**：第 i 条对应「镜头列表」第 i 个镜头，还原它的景别/运镜/动作/产品呈现/时段，
+   不要另起炉灶设计原视频没有的镜头，也不要打乱顺序。
 
 5. **每条 prompt 的结构化字段**：
    - id：sp_01, sp_02, ...
+   - 序号：对应第几个镜头（从 1 开始，与镜头列表一致）
+   - shot_id：对应原始镜头 id（照抄镜头列表里的 shot_id，如 shot_000）
    - 标题：4-8 字概括
    - 卖点：1-3 个短标签
    - 痛点：0-3 个短标签
@@ -211,6 +208,10 @@ def generate_shot_prompts(
 
     ad_id = vp.get("ad_id", "unknown")
     product_name = vp.get("产品名", "未知产品")
+
+    # 需求：镜头 prompt 与原视频镜头 1:1。以视频的实际镜头数为准（覆盖传入的 min_count）
+    shot_count = len(vp.get("镜头列表") or []) or int(vp.get("n_shots") or 0) or min_count
+    min_count = shot_count
 
     prompt_text = _prompt('shot_prompt', PROMPT).format(
         min_count=min_count,
