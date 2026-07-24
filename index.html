@@ -314,7 +314,7 @@ async function doSplit(){
   if(!total){alert('先选视频文件或粘贴视频 URL');return}
   if(!tok()){alert('先填访问口令');return}
   $('#btnSplit').disabled=true;
-  const batch=newBatchId();_curBatch=batch;localStorage.setItem('curBatch',batch);
+  const batch=await genBatchId();_curBatch=batch;localStorage.setItem('curBatch',batch);
   logOps('▶ 本次批次：'+batch+'（'+files.length+' 本地 + '+_urlList.length+' URL，合为一个任务）');
   const fd=new FormData();fd.append('project_id',proj());fd.append('batch',batch);
   fd.append('engine',$('#engine').value);fd.append('precise',$('#fast').checked?'false':'true');
@@ -421,8 +421,18 @@ function renderUrlChips(){
     s.title=u;s.appendChild(x);box.appendChild(s);
   });
 }
-function newBatchId(){const d=new Date(),z=n=>String(n).padStart(2,'0');
-  return ''+d.getFullYear()+z(d.getMonth()+1)+z(d.getDate())+'-'+z(d.getHours())+z(d.getMinutes())+z(d.getSeconds());}
+// 任务编号：日期-产品名-序号（当天同产品从 001 递增）
+async function genBatchId(){
+  const d=new Date(),z=n=>String(n).padStart(2,'0');
+  const date=''+d.getFullYear()+z(d.getMonth()+1)+z(d.getDate());
+  const prod=($('#product').value.trim()||'产品').replace(/[\/\\\s]+/g,'');
+  const pfx=date+'-'+prod+'-';
+  let maxN=0;
+  try{const jd=await api('/jobs?limit=200');(jd.jobs||[]).forEach(j=>{
+    if(j.batch&&j.batch.indexOf(pfx)===0){const m=/-(\d+)$/.exec(j.batch);if(m){const n=parseInt(m[1],10);if(n>maxN)maxN=n;}}});
+  }catch(e){}
+  return pfx+String(maxN+1).padStart(3,'0');
+}
 let _res=null;            // 缓存 /result 解析结果 {ads,common,vids,count}
 let _resLimit=5;          // 结果卡片默认展示条数
 
@@ -875,29 +885,48 @@ function reviseEditor(ptype,ctx,curSelling){
   const toggle=document.createElement('button');toggle.className='mini';toggle.textContent='✎ 修改';
   const body=document.createElement('div');body.style.cssText='display:none;margin-top:8px';
   toggle.onclick=()=>{body.style.display=(body.style.display==='none'?'':'none');};
-  let sellingInput=null;
+  let sellingBox=null;
   if(ptype==='shot'||ptype==='common'){
-    const lab=document.createElement('div');lab.className='muted';lab.style.fontSize='12px';lab.textContent='卖点（逗号分隔，直接修改后按此重写）：';
-    sellingInput=document.createElement('input');sellingInput.type='text';sellingInput.value=(curSelling||[]).join('，');
-    sellingInput.style.cssText='width:100%;margin:4px 0 8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px';
-    body.appendChild(lab);body.appendChild(sellingInput);
+    const lab=document.createElement('div');lab.className='muted';lab.style.fontSize='12px';lab.textContent='卖点（点 − 删除，输入后点 + 或回车新增）：';
+    sellingBox=sellingChips(curSelling);
+    body.appendChild(lab);body.appendChild(sellingBox);
   }
   const lab2=document.createElement('div');lab2.className='muted';lab2.style.fontSize='12px';lab2.textContent='其余修改需求（可空）：';
   const ta=document.createElement('textarea');ta.rows=2;ta.placeholder='例如：改成俯拍、加强微距特写、时长压到2秒…';
   ta.style.cssText='width:100%;margin:4px 0 8px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;font-size:13px';
   body.appendChild(lab2);body.appendChild(ta);
   const btn=document.createElement('button');btn.className='mini';btn.textContent='应用修改';
-  btn.onclick=()=>doRevise(ptype,ctx,sellingInput,ta,btn);
+  btn.onclick=()=>doRevise(ptype,ctx,sellingBox,ta,btn);
   body.appendChild(btn);
   const note=document.createElement('div');note.className='muted';note.style.cssText='font-size:11px;margin-top:6px';note.textContent='将调用 Gemini 重写并翻译，作为一个「提示词修改」任务，完成后自动刷新。';
   body.appendChild(note);
   wrap.appendChild(toggle);wrap.appendChild(body);return wrap;
 }
-async function doRevise(ptype,ctx,sellingInput,ta,btn){
+// 卖点框：每个卖点一个 chip，− 删除、+ / 回车新增，无需逗号
+function sellingChips(cur){
+  const box=document.createElement('div');box.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 8px;align-items:center';
+  const items=(cur||[]).slice();
+  const inp=document.createElement('input');inp.type='text';inp.placeholder='加卖点';
+  inp.style.cssText='border:1px solid var(--line-2);border-radius:6px;padding:4px 8px;font-size:12px;width:90px';
+  const add=document.createElement('button');add.type='button';add.className='mini';add.textContent='+';add.title='新增卖点';add.style.margin='0';
+  function chip(text){
+    const c=document.createElement('span');c.className='tag';c.style.cssText='display:inline-flex;align-items:center;gap:5px';
+    c.appendChild(document.createTextNode(text));
+    const x=document.createElement('button');x.type='button';x.textContent='−';x.title='删除';
+    x.style.cssText='border:0;background:transparent;color:var(--pain);font-size:15px;line-height:1;padding:0;cursor:pointer;font-weight:700';
+    x.onclick=()=>{const i=items.indexOf(text);if(i>=0){items.splice(i,1);render();}};
+    c.appendChild(x);return c;
+  }
+  function render(){box.innerHTML='';items.forEach(t=>box.appendChild(chip(t)));box.appendChild(inp);box.appendChild(add);}
+  const doAdd=()=>{const v=inp.value.trim();if(v&&!items.includes(v)){items.push(v);inp.value='';render();}inp.focus();};
+  add.onclick=doAdd;inp.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();doAdd();}};
+  render();box._get=()=>items.slice();return box;
+}
+async function doRevise(ptype,ctx,sellingBox,ta,btn){
   if(!tok()){alert('先填访问口令');return}
   const instruction=(ta.value||'').trim();
   let selling=null;
-  if(sellingInput){selling=sellingInput.value.split(/[，,、]/).map(s=>s.trim()).filter(Boolean);}
+  if(sellingBox){selling=sellingBox._get();}
   if(!instruction&&(!selling||!selling.length)){alert('请填写新卖点或修改需求');return}
   btn.disabled=true;btn.textContent='提交中…';
   const body={project_id:proj(),batch:ctx.batch||'',ad:(ptype==='common'?'':(ctx.ad||'')),ptype:ptype,

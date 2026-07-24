@@ -596,31 +596,50 @@ def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str
     if not keys:
         raise HTTPException(status_code=404, detail="没有文件")
 
+    import re as _re3
     work = Path(tempfile.mkdtemp(prefix="dl_"))
-    localdir = work / ad_id
-    localdir.mkdir(parents=True, exist_ok=True)
-    for k in keys:
-        name = k[len(prefix):]
-        if not name:
-            continue
-        dst = localdir / name
-        r2.download_file(k, dst)
+    tmp = work / "_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    label = batch or ""   # 批次 = 日期-产品名-序号
 
-    # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
-    if ad_id:
-        cbase = (f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/")
-        for cname in ("共性镜头prompt.json", "共性镜头prompt.en.json"):
-            try:
-                r2.download_file(cbase + cname, localdir / cname)
-            except Exception:
-                pass
+    def _arc(key, forced_ad):
+        """给 zip 里的文件起可辨识的名字：批次_对象/ 批次_对象_镜头NNN.mp4"""
+        rel = key[len(prefix):]
+        parts = [p for p in rel.split("/") if p]
+        if forced_ad:
+            adname = forced_ad; inner = parts
+        elif len(parts) >= 2:
+            adname = parts[0]; inner = parts[1:]
+        else:
+            adname = ""; inner = parts
+        folder = "_".join([p for p in [label, adname] if p]) or project_id
+        fname = inner[-1] if inner else rel
+        m = _re3.match(r"shot[_-]?(\d+)\.mp4$", fname, _re3.I)
+        if m:
+            return f"{folder}/{folder}_镜头{int(m.group(1)) + 1:03d}.mp4"
+        if fname == "首图.jpg":
+            return f"{folder}/{folder}_首图.jpg"
+        return f"{folder}/" + "/".join(inner)
 
-    # 首图：直接用 shot_000.mp4 作为封面参考（不再服务端抽帧，避免 ffmpeg 卡住导致 502）
     zip_path = work / f"{dl_name}.zip"
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for fp in localdir.rglob("*"):
-            if fp.is_file():
-                z.write(fp, fp.relative_to(localdir))
+        for k in keys:
+            if not k[len(prefix):]:
+                continue
+            dst = tmp / k.replace("/", "__")
+            r2.download_file(k, dst)
+            z.write(dst, _arc(k, ad_id or None))
+        # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
+        if ad_id:
+            folder = "_".join([p for p in [label, ad_id] if p]) or project_id
+            cbase = (f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/")
+            for cname in ("共性镜头prompt.json", "共性镜头prompt.en.json"):
+                try:
+                    dst = tmp / cname
+                    r2.download_file(cbase + cname, dst)
+                    z.write(dst, f"{folder}/{cname}")
+                except Exception:
+                    pass
 
     return FileResponse(
         zip_path, media_type="application/zip",
