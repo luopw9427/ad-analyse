@@ -166,11 +166,15 @@
   .clipcell .clipbar button{background:rgba(255,255,255,.94);border:0;color:#1b2431;padding:4px 10px;font-size:12px;border-radius:7px;font-weight:600;box-shadow:none}
   .clipcell .clipbar button:hover{background:#fff}
   .pi-ctl{float:right;display:inline-flex;gap:2px;align-items:center}
-  #clipModal{position:fixed;inset:0;z-index:80;background:rgba(16,24,40,.55);display:none;align-items:center;justify-content:center}
-  #clipModal.on{display:flex}
-  #clipModal .box{background:#000;border-radius:12px;overflow:hidden;max-width:460px;width:90%;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.4)}
-  #clipModal video{width:100%;display:block;max-height:76vh;background:#000}
-  #clipModal .x{position:absolute;top:8px;right:8px;z-index:2;background:rgba(255,255,255,.92);border:0;color:#1b2431;border-radius:8px;padding:4px 10px;font-weight:600}
+  /* 小窗播放：浮窗、不挡页面交互、可拖动 */
+  #clipPip{position:fixed;right:20px;bottom:20px;z-index:80;width:300px;background:#000;border-radius:12px;
+    overflow:hidden;box-shadow:0 16px 48px rgba(0,0,0,.45);display:none}
+  #clipPip.on{display:block}
+  #clipPipBar{display:flex;align-items:center;justify-content:space-between;background:rgba(20,24,32,.96);color:#fff;
+    padding:5px 6px 5px 10px;cursor:move;font-size:12px;user-select:none}
+  #clipPipBar .x{background:transparent;border:0;color:#fff;font-size:14px;padding:2px 7px;cursor:pointer;box-shadow:none;font-weight:600}
+  #clipPipBar .x:hover{background:rgba(255,255,255,.16)}
+  #clipPip video{width:100%;display:block;background:#000;max-height:56vh}
 </style>
 </head>
 <body>
@@ -271,7 +275,7 @@
   </div>
   <div id="drawerBody"></div>
 </div>
-<div id="clipModal" onclick="closeClip(event)"><div class="box"><button class="x" onclick="closeClip()">✕</button><video id="clipVideo" controls playsinline></video></div></div>
+<div id="clipPip"><div id="clipPipBar"><span>原镜头片段</span><button class="x" onclick="closeClip()">✕</button></div><video id="clipVideo" controls playsinline></video></div>
 <script>
 const $=s=>document.querySelector(s);
 const proj=()=>$('#project').value.trim();
@@ -814,7 +818,7 @@ function toggleDrawerFull(){
 }
 function wireDrawer(){
   measureHdr();window.addEventListener('resize',measureHdr);
-  wireScrollbars();
+  wireScrollbars();wirePip();
   updTab();
   const grip=$('#drawerGrip');
   if(grip){
@@ -825,10 +829,21 @@ function wireDrawer(){
     window.addEventListener('mouseup',()=>{if(!_dragging)return;_dragging=false;document.body.style.userSelect='';});
   }
 }
-// 小窗播放原镜头片段
-function openClip(url){if(!url)return;const v=$('#clipVideo');v.src=url;$('#clipModal').classList.add('on');try{v.play();}catch(e){}}
-function closeClip(e){if(e&&e.target&&e.target!==$('#clipModal')&&!(e.target.classList&&e.target.classList.contains('x')))return;
-  const v=$('#clipVideo');try{v.pause();}catch(_){}v.removeAttribute('src');$('#clipModal').classList.remove('on');}
+// 小窗播放原镜头片段（浮窗，不挡页面交互，可拖动）
+function openClip(url){if(!url)return;const v=$('#clipVideo');v.src=url;$('#clipPip').classList.add('on');try{v.play();}catch(e){}}
+function closeClip(){const v=$('#clipVideo');try{v.pause();}catch(_){}v.removeAttribute('src');$('#clipPip').classList.remove('on');}
+function wirePip(){
+  const bar=$('#clipPipBar'),pip=$('#clipPip');if(!bar||!pip||pip._w)return;pip._w=1;
+  let sx,sy,ox,oy,drag=false;
+  bar.addEventListener('mousedown',e=>{if(e.target.classList&&e.target.classList.contains('x'))return;
+    drag=true;const r=pip.getBoundingClientRect();sx=e.clientX;sy=e.clientY;ox=r.left;oy=r.top;
+    pip.style.right='auto';pip.style.bottom='auto';pip.style.left=ox+'px';pip.style.top=oy+'px';e.preventDefault();});
+  window.addEventListener('mousemove',e=>{if(!drag)return;
+    let l=ox+e.clientX-sx,t=oy+e.clientY-sy;
+    l=Math.max(0,Math.min(l,window.innerWidth-pip.offsetWidth));t=Math.max(0,Math.min(t,window.innerHeight-40));
+    pip.style.left=l+'px';pip.style.top=t+'px';});
+  window.addEventListener('mouseup',()=>drag=false);
+}
 function downloadClip(u){const a=document.createElement('a');a.href=u;a.download=(u.split('/').pop()||'clip').split('?')[0];a.target='_blank';document.body.appendChild(a);a.click();a.remove();}
 
 // 打包下载该广告全部产物
@@ -1072,7 +1087,7 @@ function renderAdDetail(batch,ad,d,videos){
       const cell=document.createElement('div');cell.className='clipcell';
       const v=document.createElement('video');v.src=u;v.preload='metadata';cell.appendChild(v);
       const barc=document.createElement('div');barc.className='clipbar';
-      const pb=document.createElement('button');pb.textContent='▶ 播放';pb.onclick=()=>openClip(u);
+      const pb=document.createElement('button');pb.title='播放';pb.textContent='▶';pb.onclick=()=>openClip(u);
       const db=document.createElement('button');db.title='下载切片';db.innerHTML=IC.dl;db.dataset.ic=IC.dl;db.onclick=()=>{downloadClip(u);markDone(db);};
       barc.appendChild(pb);barc.appendChild(db);cell.appendChild(barc);
       w.appendChild(cell);});
