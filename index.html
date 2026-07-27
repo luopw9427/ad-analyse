@@ -175,6 +175,26 @@
   #clipPipBar .x{background:transparent;border:0;color:#fff;font-size:14px;padding:2px 7px;cursor:pointer;box-shadow:none;font-weight:600}
   #clipPipBar .x:hover{background:rgba(255,255,255,.16)}
   #clipPip video{width:100%;display:block;background:#000;max-height:56vh}
+  /* 登录页 + 弹窗 */
+  #loginMask{position:fixed;inset:0;z-index:200;background:linear-gradient(180deg,#eef2f8,#e4e9f2);display:none;align-items:center;justify-content:center}
+  #loginMask.on{display:flex}
+  .authcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 30px;width:340px;box-shadow:var(--sh)}
+  .authcard h2{margin:0 0 6px;font-size:18px}
+  .authcard .sub{color:var(--muted);font-size:12.5px;margin-bottom:16px}
+  .authcard label{display:block;font-size:12px;color:var(--sub);margin:10px 0 4px}
+  .authcard input[type=text],.authcard input[type=password]{width:100%}
+  .authcard .row2{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:var(--sub)}
+  .authcard button.primary{width:100%;margin-top:16px}
+  .autherr{color:var(--pain);font-size:12.5px;margin-top:10px;min-height:16px}
+  .modal{position:fixed;inset:0;z-index:150;background:rgba(16,24,40,.45);display:none;align-items:center;justify-content:center}
+  .modal.on{display:flex}
+  .modal .box{background:var(--panel);border-radius:14px;padding:20px 22px;width:min(560px,92vw);max-height:82vh;overflow:auto;box-shadow:var(--sh);position:relative}
+  .modal .box h3{margin:0 0 14px}
+  .modal .x{position:absolute;top:12px;right:14px}
+  .utable{width:100%;font-size:13px}
+  .utable td,.utable th{padding:7px 8px}
+  .rolechip{font-size:11px;padding:1px 8px;border-radius:20px;background:var(--accent-weak);color:var(--accent)}
+  .rolechip.user{background:var(--panel-2);color:var(--sub)}
 </style>
 </head>
 <body>
@@ -191,13 +211,15 @@
   <span class="muted">项目名</span>
   <input id="project" placeholder="如 test" size="10"
          title="一批广告用同一个项目名。R2 里按 projects/{项目名}/{广告}/ 存放，分析和横向对比也按项目为单位">
-  <span class="muted">访问口令</span>
-  <input id="token" placeholder="APP_TOKEN" type="password" size="10"
-         title="服务端设置的 APP_TOKEN，用于调用接口鉴权。填一次会记住">
-  <button class="eye" onclick="toggleEye('token',this)" title="显示/隐藏">👁</button>
   <button onclick="loadAll()">加载结果</button>
   <span id="status" class="muted"></span>
-  <button onclick="location.href='/prompts'" style="margin-left:auto" title="自定义各环节分析提示词（存本机浏览器）">提示词修改</button>
+  <span id="userbox" style="margin-left:auto;display:flex;gap:8px;align-items:center">
+    <span class="muted" id="whoami" title="当前登录用户"></span>
+    <button class="mini" id="btnUsers" style="display:none" onclick="openUsers()">用户管理</button>
+    <button class="mini" onclick="openChangePin()">改口令</button>
+    <button class="mini" onclick="doLogout()">退出</button>
+    <button class="mini" onclick="location.href='/prompts'" title="自定义各环节分析提示词（存本机浏览器）">提示词修改</button>
+  </span>
 </header>
 <div id="scroll">
 <main>
@@ -276,26 +298,127 @@
   <div id="drawerBody"></div>
 </div>
 <div id="clipPip"><div id="clipPipBar"><span>原镜头片段</span><button class="x" onclick="closeClip()">✕</button></div><video id="clipVideo" controls playsinline></video></div>
+
+<div id="loginMask"><div class="authcard">
+  <h2>视频广告分析</h2>
+  <div class="sub">请登录后使用</div>
+  <label>用户名</label>
+  <input id="lg_user" type="text" autocomplete="username" placeholder="用户名">
+  <label>口令</label>
+  <input id="lg_pin" type="password" autocomplete="current-password" placeholder="口令" onkeydown="if(event.key==='Enter')doLogin()">
+  <div class="row2"><input type="checkbox" id="lg_remember"><label for="lg_remember" style="margin:0">记住登录状态（本电脑长期免登）</label></div>
+  <button class="primary" onclick="doLogin()">登录</button>
+  <div class="autherr" id="lg_err"></div>
+</div></div>
+
+<div id="usersModal" class="modal"><div class="box">
+  <button class="mini x" onclick="closeUsers()">✕</button>
+  <h3>用户管理</h3>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+    <input id="nu_user" type="text" placeholder="用户名" size="10">
+    <input id="nu_pin" type="text" placeholder="初始口令" size="10">
+    <select id="nu_role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+    <button class="mini" onclick="createUser()">新建用户</button>
+  </div>
+  <div id="usersList"></div>
+</div></div>
+
+<div id="pinModal" class="modal"><div class="box" style="width:min(360px,92vw)">
+  <button class="mini x" onclick="closePin()">✕</button>
+  <h3>修改口令</h3>
+  <label style="font-size:12px;color:var(--sub)">原口令</label>
+  <input id="cp_old" type="password" style="width:100%;margin:4px 0 10px">
+  <label style="font-size:12px;color:var(--sub)">新口令</label>
+  <input id="cp_new" type="password" style="width:100%;margin:4px 0 10px">
+  <div class="autherr" id="cp_err"></div>
+  <button class="mini" onclick="changePin()">确认修改</button>
+  <div class="muted" style="font-size:11px;margin-top:8px">改完需重新登录（旧登录会失效）。</div>
+</div></div>
+
 <script>
 const $=s=>document.querySelector(s);
 const proj=()=>$('#project').value.trim();
 function toggleEye(id,btn){const el=$('#'+id);const show=el.type==='password';el.type=show?'text':'password';btn.textContent=show?'🙈':'👁'}
-const tok=()=>$('#token').value.trim();
-const headers=()=>tok()?{'X-API-Token':tok()}:{};
+// ===== 登录 / 鉴权 =====
+let _token=null,_user='',_role='';
+const tok=()=>_token;                                   // 兼容旧的 if(!tok()) 守卫
+const headers=()=>_token?{'Authorization':'Bearer '+_token}:{};
+function _loadToken(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||null}catch(e){return null}}
+function _saveToken(t,remember){_token=t;try{if(remember){localStorage.setItem('authToken',t);sessionStorage.removeItem('authToken')}else{sessionStorage.setItem('authToken',t);localStorage.removeItem('authToken')}}catch(e){}}
+function _clearToken(){_token=null;try{localStorage.removeItem('authToken');sessionStorage.removeItem('authToken')}catch(e){}}
+function showLogin(){$('#loginMask').classList.add('on')}
+function hideLogin(){$('#loginMask').classList.remove('on')}
+function applyUser(u,r){_user=u;_role=r;$('#whoami').textContent=u+'（'+(r==='admin'?'管理员':'成员')+'）';$('#btnUsers').style.display=(r==='admin'?'':'none')}
+async function doLogin(){
+  const err=$('#lg_err');err.textContent='';
+  const username=$('#lg_user').value.trim(),pin=$('#lg_pin').value,remember=$('#lg_remember').checked;
+  if(!username){err.textContent='请输入用户名';return}
+  try{
+    const r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,pin,remember})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.ok){err.textContent=(d&&d.detail)||'登录失败';return}
+    _saveToken(d.token,remember);applyUser(d.username,d.role);hideLogin();$('#lg_pin').value='';afterLogin();
+  }catch(e){err.textContent='登录失败：'+e.message}
+}
+function doLogout(){_clearToken();_user='';_role='';showLogin()}
+function onAuthFail(){_clearToken();showLogin()}
+async function afterLogin(){try{await loadAll()}catch(e){}}
+async function bootAuth(){
+  _token=_loadToken();
+  if(!_token){showLogin();return}
+  try{const r=await fetch('/auth/me',{headers:headers()});if(!r.ok)throw 0;
+    const d=await r.json();applyUser(d.username,d.role);hideLogin();afterLogin();
+  }catch(e){_clearToken();showLogin()}
+}
+// 改口令
+function openChangePin(){$('#cp_err').textContent='';$('#cp_old').value='';$('#cp_new').value='';$('#pinModal').classList.add('on')}
+function closePin(){$('#pinModal').classList.remove('on')}
+async function changePin(){
+  const err=$('#cp_err');err.textContent='';
+  const old_pin=$('#cp_old').value,new_pin=$('#cp_new').value;
+  if(!new_pin){err.textContent='请输入新口令';return}
+  try{const r=await fetch('/auth/change_pin',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({old_pin,new_pin})});
+    const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){err.textContent=(d&&d.detail)||'修改失败';return}
+    closePin();alert('口令已修改，请重新登录');doLogout();
+  }catch(e){err.textContent='修改失败：'+e.message}
+}
+// 用户管理（管理员）
+function openUsers(){$('#usersModal').classList.add('on');renderUsers()}
+function closeUsers(){$('#usersModal').classList.remove('on')}
+async function _uPost(path,body){const r=await fetch(path,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){alert((d&&d.detail)||'操作失败');return false}return true}
+async function renderUsers(){
+  const box=$('#usersList');box.innerHTML='<div class="muted">加载中…</div>';
+  try{const d=await api('/users');let h='<table class="utable"><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr>';
+    (d.users||[]).forEach(u=>{const me=u.username===_user;
+      h+='<tr><td>'+u.username+(me?'（我）':'')+'</td>'
+       +'<td><span class="rolechip '+(u.role==='admin'?'':'user')+'">'+(u.role==='admin'?'管理员':'成员')+'</span></td>'
+       +'<td class="muted">'+(u.disabled?'已禁用':'正常')+'</td><td>'
+       +(me?'':'<button class="mini" onclick="setRole(\''+u.username+'\',\''+(u.role==='admin'?'user':'admin')+'\')">'+(u.role==='admin'?'降为成员':'升为管理员')+'</button>')
+       +'<button class="mini" onclick="resetPin(\''+u.username+'\')">重置口令</button>'
+       +(me?'':'<button class="mini" onclick="toggleDisable(\''+u.username+'\','+(u.disabled?'false':'true')+')">'+(u.disabled?'启用':'禁用')+'</button>')
+       +(me?'':'<button class="mini del" onclick="delUser(\''+u.username+'\')">删除</button>')
+       +'</td></tr>';});
+    box.innerHTML=h+'</table>';
+  }catch(e){box.innerHTML='<div class="muted">加载失败：'+e.message+'</div>'}
+}
+async function createUser(){const username=$('#nu_user').value.trim(),pin=$('#nu_pin').value,role=$('#nu_role').value;if(!username){alert('填用户名');return}if(await _uPost('/users',{username,pin,role})){$('#nu_user').value='';$('#nu_pin').value='';renderUsers()}}
+async function setRole(username,role){if(await _uPost('/users/role',{username,role}))renderUsers()}
+async function resetPin(username){const pin=prompt('给「'+username+'」设置新口令：');if(pin==null)return;if(await _uPost('/users/reset_pin',{username,pin}))alert('已重置')}
+async function toggleDisable(username,disabled){if(await _uPost('/users/disable',{username,disabled}))renderUsers()}
+async function delUser(username){if(!confirm('删除用户 '+username+'？'))return;if(await _uPost('/users/delete',{username}))renderUsers()}
 const setStatus=t=>$('#status').textContent=t||'';
-$('#token').value=localStorage.getItem('tok')||'';
 $('#project').value=localStorage.getItem('proj')||'test';
 $('#product').value=localStorage.getItem('prod')||'';
 $('#hyp').value=localStorage.getItem('hyp')||'';
 $('#engine').value=localStorage.getItem('eng')||'gpu';
 $('#orkey').value=localStorage.getItem('ork')||'';
 $('#dskey').value=localStorage.getItem('dsk')||'';
-function remember(){localStorage.setItem('tok',tok());localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim());localStorage.setItem('dsk',$('#dskey').value.trim())}
+function remember(){localStorage.setItem('proj',proj());localStorage.setItem('prod',$('#product').value.trim());localStorage.setItem('hyp',$('#hyp').value.trim());localStorage.setItem('eng',$('#engine').value);localStorage.setItem('ork',$('#orkey').value.trim());localStorage.setItem('dsk',$('#dskey').value.trim())}
 
 function setOps(t){$('#status').textContent=t||''}
 function logOps(t){const l=$('#opslog');l.textContent+=t+'\n';l.scrollTop=l.scrollHeight}
 
-async function api(path){const r=await fetch(path,{headers:headers()});if(!r.ok)throw new Error(path+' -> '+r.status);return r.json()}
+async function api(path){const r=await fetch(path,{headers:headers()});if(r.status===401){onAuthFail();throw new Error('401 未登录')}if(!r.ok)throw new Error(path+' -> '+r.status);return r.json()}
 
 // 轮询 /jobs 直到指定任务完成，返回该任务
 async function waitJob(jid,onTick){
@@ -442,19 +565,21 @@ async function genBatchId(){
 let _res=null;            // 缓存 /result 解析结果 {ads,common,vids,count}
 let _resLimit=5;          // 结果卡片默认展示条数
 
-// ===== 个人收藏 =====
-let favUser=localStorage.getItem('favUser')||'default';   // 暂无登录，先用预置用户
-let _favSet=new Set();    // 已收藏的 ref 集合（用于 ⭐ 亮/灭）
-let _favData=[];          // 收藏明细
-let _drawerMode='all';    // 右边栏视图：all 全部结果 / fav 我的收藏
-function favHead(){return {...headers(),'X-Fav-User':favUser};}
+// ===== 收藏（团队共享可见；⭐ 亮=当前用户自己收藏过）=====
+let _favSet=new Set();    // 当前用户已收藏的 ref 集合
+let _favMine={};          // ref -> 我的收藏行 id
+let _favData=[];          // 全部收藏（含所有人，带 owner）
+let _drawerMode='all';    // 右边栏视图：all 全部结果 / fav 收藏
 async function loadFavs(){
-  try{const r=await fetch('/fav/list',{headers:favHead()});if(!r.ok)throw 0;
-    const d=await r.json();_favData=d.favorites||[];_favSet=new Set(_favData.map(f=>f.ref));}
-  catch(e){_favData=[];_favSet=new Set();}
+  try{const r=await fetch('/fav/list',{headers:headers()});if(r.status===401){onAuthFail();throw 0}if(!r.ok)throw 0;
+    const d=await r.json();_favData=d.favorites||[];
+    _favMine={};_favData.forEach(f=>{if(f.owner===_user)_favMine[f.ref]=f.id;});
+    _favSet=new Set(Object.keys(_favMine));}
+  catch(e){_favData=[];_favSet=new Set();_favMine={};}
 }
 async function favApi(path,body){
-  const r=await fetch(path,{method:'POST',headers:{...favHead(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const r=await fetch(path,{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status===401){onAuthFail();throw new Error('401')}
   if(!r.ok)throw new Error(path+' -> '+r.status);return r.json();
 }
 function favStar(kind,ref,label,meta){
@@ -467,14 +592,21 @@ function favStar(kind,ref,label,meta){
 async function toggleFav(kind,ref,label,meta,btn){
   const on=_favSet.has(ref);
   try{
-    if(on){await favApi('/fav/remove',{ref});_favSet.delete(ref);}
-    else{await favApi('/fav/add',{kind,ref,label:label||'',meta:meta||{}});_favSet.add(ref);
-         _favData.unshift({kind,ref,label:label||'',meta:meta||{}});}
+    if(on){await favApi('/fav/remove',{id:_favMine[ref]});_favSet.delete(ref);
+           _favData=_favData.filter(f=>!(f.ref===ref&&f.owner===_user));delete _favMine[ref];}
+    else{const d=await favApi('/fav/add',{kind,ref,label:label||'',meta:meta||{}});_favSet.add(ref);
+         _favMine[ref]=d.id;_favData.unshift({id:d.id,owner:_user,kind,ref,label:label||'',meta:meta||{}});}
   }catch(e){alert('收藏操作失败：'+e.message);return;}
-  if(on)_favData=_favData.filter(f=>f.ref!==ref);
   if(btn){const nb=_favSet.has(ref);btn.textContent=nb?'★':'☆';btn.classList.toggle('on',nb);btn.title=nb?'取消收藏':'收藏';}
   if(_drawerMode==='fav')renderDrawer();
   document.querySelectorAll('#jobs .fav-star').forEach(s=>{if(s.dataset.ref===ref){const nb=_favSet.has(ref);s.textContent=nb?'★':'☆';s.classList.toggle('on',nb);}});
+}
+// 收藏视图里按行删除（自己的或管理员任何人的）
+async function favDelRow(f){
+  try{await favApi('/fav/remove',{id:f.id});}catch(e){alert('删除失败：'+e.message);return;}
+  _favData=_favData.filter(x=>x.id!==f.id);
+  if(f.owner===_user){_favSet.delete(f.ref);delete _favMine[f.ref];}
+  renderDrawer();
 }
 async function openDrawerMode(mode){
   await loadFavs();               // 刷新收藏态，保证 ⭐ 亮/灭正确
@@ -589,14 +721,14 @@ async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
-    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
+    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>创建人</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
     const splitRef={};d.jobs.forEach(j=>{if(j.kind==='split'&&j.batch&&j.ref)splitRef[j.batch]=j.ref});
     d.jobs.slice(0,_jobLimit).forEach(j=>{const objName=(j.kind==='analyze'&&splitRef[j.batch])?splitRef[j.batch]:(j.ref||'');const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');
       const fref='task|'+j.project_id+'|'+(j.batch||j.ref||'');
       const fmeta={project:j.project_id,batch:(j.batch||''),jobKind:j.kind,label:objName};
       const fon=_favSet.has(fref)?' on':'';const fstar=_favSet.has(fref)?'★':'☆';
       const slot=`<button class="fav-star${fon}" type="button" data-ref="${fref.replace(/"/g,'&quot;')}" data-kind="task" data-label="${(objName||'').replace(/"/g,'&quot;')}" data-meta='${JSON.stringify(fmeta).replace(/'/g,"&#39;")}' title="收藏/取消收藏">${fstar}</button>`;
-      h+=`<tr><td>${j.id}</td><td>${kindLabel(j.kind)}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
+      h+=`<tr><td>${j.id}</td><td>${kindLabel(j.kind)}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.owner||'—'}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -719,8 +851,11 @@ function renderFavInto(dr){
 }
 function favRow(f){
   const m=f.meta||{};const row=document.createElement('div');row.className='fav-row';
-  const rm=document.createElement('button');rm.className='mini del rm';rm.textContent='✕ 取消';
-  rm.onclick=()=>toggleFav(f.kind,f.ref,f.label,m,null);row.appendChild(rm);
+  if(f.owner===_user||_role==='admin'){   // 自己的或管理员可删
+    const rm=document.createElement('button');rm.className='mini del rm';rm.textContent='✕ 取消';
+    rm.onclick=()=>favDelRow(f);row.appendChild(rm);
+  }
+  if(f.owner&&f.owner!==_user){const o=document.createElement('span');o.className='rolechip user';o.style.cssText='position:absolute;top:10px;right:70px';o.textContent='@'+f.owner;row.appendChild(o);}
   const t=document.createElement('div');t.style.cssText='font-weight:600;margin-bottom:6px;padding-right:56px;word-break:break-all';
   if(f.kind==='task'){
     t.textContent='['+(m.jobKind||'任务')+'] '+(f.label||m.batch||'');row.appendChild(t);
@@ -1137,6 +1272,7 @@ function renderCommon(v,batch){
 
 // 初始化：放在所有声明之后，避免 TDZ（wireDrawer 内含 measureHdr）
 wireDrawer();_drawerMode='all';renderDrawer();openDrawer();
+bootAuth();   // 登录门：有有效 token 自动进入，否则显示登录页
 </script>
 </body>
 </html>

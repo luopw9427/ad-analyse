@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 import zipfile
@@ -46,8 +46,13 @@ ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
 APP_TOKEN = os.environ.get("APP_TOKEN", "")
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
-# 收藏：暂无登录，先用预置用户；将来登录做好后由前端传登录用户名到 X-Fav-User
 FAV_DEFAULT_USER = os.environ.get("FAV_DEFAULT_USER", "default")
+# ── 登录 / 鉴权 ────────────────────────────────────────────────
+AUTH_SECRET = os.environ.get("AUTH_SECRET", "") or APP_TOKEN or "change-me-please"
+ADMIN_USER = os.environ.get("ADMIN_USER", "")
+ADMIN_PIN = os.environ.get("ADMIN_PIN", "")
+TOKEN_DAYS_REMEMBER = int(os.environ.get("TOKEN_DAYS_REMEMBER", "0"))   # 0 = 记住则永久
+TOKEN_HOURS_SESSION = int(os.environ.get("TOKEN_HOURS_SESSION", "12"))  # 不记住的短效
 # 分析产物里需要翻译成英文的 JSON（键名结构保留，只译值）→ 存为同名 .en.json
 TRANSLATE_NAMES = ("ad_aggregate.json", "video_prompt.json",
                    "shot_prompts.json", "共性镜头prompt.json")
@@ -84,17 +89,65 @@ app = FastAPI(title="视频广告分析服务", version="0.3")
 @app.on_event("startup")
 def _startup():
     db.init_db()
-    db.fav_user_ensure(FAV_DEFAULT_USER)   # 预置默认收藏用户
+    if ADMIN_USER and ADMIN_PIN:
+        db.user_ensure_admin(ADMIN_USER, ADMIN_PIN)          # 预置管理员（方案 A）
+    elif db.admin_count() == 0:
+        db.fav_user_ensure(FAV_DEFAULT_USER, "", role="admin")  # 无管理员则把 default 设为管理员，供首次进入建号
+        print("[auth] 未配置 ADMIN_USER/ADMIN_PIN，已把 default（空口令）设为临时管理员，请尽快登录并创建正式管理员")
 
 
-def _fav_owner(x_fav_user: str) -> str:
-    """当前收藏归属用户。暂无登录：用请求头，缺省回退预置用户。"""
-    return (x_fav_user or "").strip() or FAV_DEFAULT_USER
+# ── 签名 token（无状态，HMAC-SHA256）──────────────────────────────
+import base64 as _b64, hmac as _hmac, hashlib as _hl
+
+def _b64u(b: bytes) -> str:
+    return _b64.urlsafe_b64encode(b).decode().rstrip("=")
+
+def _b64u_dec(s: str) -> bytes:
+    return _b64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+def make_token(username: str, role: str, pin_ver: int, remember: bool) -> str:
+    now = int(time.time())
+    if remember:
+        exp = 0 if TOKEN_DAYS_REMEMBER <= 0 else now + TOKEN_DAYS_REMEMBER * 86400  # 0=永久
+    else:
+        exp = now + TOKEN_HOURS_SESSION * 3600
+    payload = {"u": username, "r": role, "v": int(pin_ver), "iat": now, "exp": exp}
+    body = _b64u(json.dumps(payload, separators=(",", ":")).encode())
+    sig = _b64u(_hmac.new(AUTH_SECRET.encode(), body.encode(), _hl.sha256).digest())
+    return body + "." + sig
+
+def parse_token(tok: str):
+    try:
+        body, sig = tok.split(".")
+        good = _b64u(_hmac.new(AUTH_SECRET.encode(), body.encode(), _hl.sha256).digest())
+        if not _hmac.compare_digest(sig, good):
+            return None
+        p = json.loads(_b64u_dec(body))
+        if p.get("exp") and int(p["exp"]) > 0 and int(p["exp"]) < time.time():
+            return None
+        return p
+    except Exception:
+        return None
 
 
-def _check_token(x_api_token: str):
-    if APP_TOKEN and x_api_token != APP_TOKEN:
-        raise HTTPException(status_code=401, detail="invalid X-API-Token")
+def current_user(authorization: str = Header(default="")):
+    """从 Authorization: Bearer <token> 解析当前登录用户；无效则 401。"""
+    tok = authorization.split(" ", 1)[1] if authorization.lower().startswith("bearer ") else authorization
+    p = parse_token(tok)
+    if not p:
+        raise HTTPException(status_code=401, detail="未登录或登录已失效")
+    u = db.user_get(p.get("u", ""))
+    if not u or u.get("disabled"):
+        raise HTTPException(status_code=401, detail="账号不可用")
+    if int(u.get("pin_ver", 1)) != int(p.get("v", 1)):
+        raise HTTPException(status_code=401, detail="登录已失效，请重新登录")
+    return {"username": u["username"], "role": u["role"]}
+
+
+def require_admin(user: dict = Depends(current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="需要管理员权限")
+    return user
 
 
 class AnalyzeReq(BaseModel):
@@ -144,7 +197,7 @@ def health():
     return {"ok": True, "service": "video-ad-analysis"}
 
 
-def _run_analyze_bg(req: "AnalyzeReq", job_id):
+def _run_analyze_bg(req: "AnalyzeReq", job_id, owner=""):
     """后台线程跑分析，完成后更新数据库任务状态。"""
     cmd = [sys.executable, str(RUN_FROM_R2),
            "--project", req.project_id, "--product", req.product]
@@ -200,7 +253,7 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
                 instr = translator.pick_instr((req.custom_prompts or {}).get("translate"))
                 threading.Thread(
                     target=_translate_bg,
-                    args=(req.project_id, req.batch or "", instr, ds_key),
+                    args=(req.project_id, req.batch or "", instr, ds_key, owner),
                     daemon=True).start()
             else:
                 print("[translate] 跳过：未配置 DEEPSEEK_API_KEY")
@@ -208,11 +261,11 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id):
         db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
 
 
-def _translate_bg(project_id, batch, instr, ds_key):
+def _translate_bg(project_id, batch, instr, ds_key, owner=""):
     """后台并发翻译：把批次内生成的中文 JSON 译成英文，逐个上传 <名>.en.json。"""
     prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
     ref = batch or project_id
-    job_id = db.start_job("translate", project_id, ref, batch=batch or "")
+    job_id = db.start_job("translate", project_id, ref, batch=batch or "", owner=owner)
     t0 = time.time()
     try:
         keys = r2.list_keys(prefix)
@@ -263,9 +316,8 @@ def _translate_bg(project_id, batch, instr, ds_key):
 
 
 @app.post("/analyze")
-def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
+def analyze(req: AnalyzeReq, user: dict = Depends(current_user)):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
-    _check_token(x_api_token)
     # 对象名用该批次的视频名（和拆分一致），而非批次 id
     ref = req.batch or ""
     try:
@@ -277,8 +329,8 @@ def analyze(req: AnalyzeReq, x_api_token: str = Header(default="")):
                 ref = "、".join(ads)
     except Exception:
         pass
-    job_id = db.start_job("analyze", req.project_id, ref, product=req.product, batch=req.batch or "")
-    threading.Thread(target=_run_analyze_bg, args=(req, job_id), daemon=True).start()
+    job_id = db.start_job("analyze", req.project_id, ref, product=req.product, batch=req.batch or "", owner=user["username"])
+    threading.Thread(target=_run_analyze_bg, args=(req, job_id, user["username"]), daemon=True).start()
     return {
         "ok": True, "started": True, "job_id": job_id,
         "r2_prefix": f"projects/{req.project_id}/" + (f"{req.batch}/" if req.batch else ""),
@@ -433,9 +485,8 @@ def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
                 engine: str = Form(default="cpu"), precise: bool = Form(default=True),
                 keep_raw: bool = Form(default=False), urls: str = Form(default=""),
                 files: Optional[List[UploadFile]] = File(None),
-                x_api_token: str = Header(default="")):
+                user: dict = Depends(current_user)):
     """本次上传（本地文件 + 粘贴的 URL）= 一个批次 = 一条任务。"""
-    _check_token(x_api_token)
     batch = batch or time.strftime("%Y%m%d-%H%M%S")
     engine = (engine or "cpu").lower()
     work = Path(tempfile.mkdtemp(prefix="splitb_"))
@@ -459,7 +510,7 @@ def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
     if not items:
         raise HTTPException(status_code=400, detail="没有视频（本地文件或 URL 至少一个）")
     ref = "、".join(it["ad"] for it in items)[:60]
-    job_id = db.start_job("split", project_id, ref, engine=engine, batch=batch)
+    job_id = db.start_job("split", project_id, ref, engine=engine, batch=batch, owner=user["username"])
     threading.Thread(target=_run_split_batch_bg,
                      args=(project_id, batch, items, str(work), engine, precise, keep_raw, job_id),
                      daemon=True).start()
@@ -474,9 +525,8 @@ def split(project_id: str = Form(...),
           keep_raw: bool = Form(default=False),     # GPU 路径是否保留原视频
           batch: str = Form(default=""),            # 本次上传批次 id
           file: UploadFile = File(...),
-          x_api_token: str = Header(default="")):
+          user: dict = Depends(current_user)):
     """异步：先存上传文件，立即返回 job_id，后台拆分+回传，前端轮询 /jobs。"""
-    _check_token(x_api_token)
     ad = ad_id or Path(file.filename or "ad").stem
     work = Path(tempfile.mkdtemp(prefix="split_"))
     video_path = work / (file.filename or "input.mp4")
@@ -484,7 +534,7 @@ def split(project_id: str = Form(...),
         shutil.copyfileobj(file.file, f)
     engine = (engine or "cpu").lower()
     batch = batch or time.strftime("%Y%m%d-%H%M%S")
-    job_id = db.start_job("split", project_id, ad, engine=engine, batch=batch)
+    job_id = db.start_job("split", project_id, ad, engine=engine, batch=batch, owner=user["username"])
     threading.Thread(target=_run_split_bg,
                      args=(project_id, batch, ad, str(video_path), str(work), precise,
                            job_id, engine, keep_raw),
@@ -494,8 +544,7 @@ def split(project_id: str = Form(...),
 
 @app.get("/result")
 def result(project_id: str, include_content: bool = True, batch: str = "",
-           x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
+           user: dict = Depends(current_user)):
 
     prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
     keys = r2.list_keys(prefix)
@@ -524,8 +573,7 @@ def result(project_id: str, include_content: bool = True, batch: str = "",
 
 
 @app.get("/jobs")
-def jobs(limit: int = 50, x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
+def jobs(limit: int = 50, user: dict = Depends(current_user)):
     return {"jobs": db.recent(limit), "db_enabled": db.enabled()}
 
 
@@ -538,11 +586,19 @@ class DeleteReq(BaseModel):
 
 
 @app.post("/delete")
-def delete(req: DeleteReq, x_api_token: str = Header(default="")):
-    """删除 R2 上的产物，释放存储。"""
-    _check_token(x_api_token)
+def delete(req: DeleteReq, user: dict = Depends(current_user)):
+    """删除 R2 上的产物，释放存储。权限：管理员随意；普通用户仅限自己创建的批次；整项目删除仅管理员。"""
     if not req.project_id:
         raise HTTPException(status_code=400, detail="缺少 project_id")
+
+    is_admin = user["role"] == "admin"
+    if not is_admin:
+        if req.batch:
+            bo = db.batch_owner(req.project_id, req.batch)
+            if bo and bo != user["username"]:
+                raise HTTPException(status_code=403, detail="只能删除自己创建的批次")
+        else:
+            raise HTTPException(status_code=403, detail="删除整个项目需要管理员权限")
 
     pid = req.project_id
     bseg = f"{req.batch}/" if req.batch else ""   # 批次层
@@ -581,10 +637,9 @@ class JobDeleteReq(BaseModel):
 
 
 @app.get("/download")
-def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str = Header(default="")):
+def download(project_id: str, ad_id: str = "", batch: str = "", user: dict = Depends(current_user)):
     """打包某广告的全部产物为 zip：切片、shots.json、卖点(ad_aggregate)、
     脚本/镜头 prompt、项目级共性 prompt、以及首图(shot_000 第一帧)。"""
-    _check_token(x_api_token)
     import r2_storage as r2
     if ad_id:
         prefix = f"projects/{project_id}/{batch}/{ad_id}/" if batch else f"projects/{project_id}/{ad_id}/"
@@ -649,16 +704,14 @@ def download(project_id: str, ad_id: str = "", batch: str = "", x_api_token: str
 
 
 @app.post("/jobs/delete")
-def jobs_delete(req: JobDeleteReq, x_api_token: str = Header(default="")):
-    """删除单条任务记录（不动 R2 文件）。"""
-    _check_token(x_api_token)
-    return {"ok": True, "deleted": db.delete_job(req.job_id)}
+def jobs_delete(req: JobDeleteReq, user: dict = Depends(current_user)):
+    """删除单条任务记录（不动 R2 文件）。非管理员只能删自己的。"""
+    return {"ok": True, "deleted": db.delete_job(req.job_id, user["username"], user["role"] == "admin")}
 
 
 @app.get("/download_file")
-def download_file(url: str, name: str = "", x_api_token: str = Header(default="")):
+def download_file(url: str, name: str = "", user: dict = Depends(current_user)):
     """把 R2 公开文件以附件形式流式返回，强制浏览器下载（避免跨域直链变成在线播放）。"""
-    _check_token(x_api_token)
     base = getattr(r2, "PUBLIC_URL", "") or ""
     if not (url.startswith("https://") and (".r2.dev/" in url or (base and url.startswith(base)))):
         raise HTTPException(status_code=400, detail="非法下载地址")
@@ -678,7 +731,7 @@ def download_file(url: str, name: str = "", x_api_token: str = Header(default=""
     )
 
 
-# ── 个人收藏 ─────────────────────────────────────────────────────
+# ── 收藏（团队共享可见；增删按 owner/admin 权限）──────────────────
 class FavAddReq(BaseModel):
     kind: str                       # task / clip / prompt
     ref: str                        # 去重键
@@ -687,54 +740,140 @@ class FavAddReq(BaseModel):
 
 
 class FavRemoveReq(BaseModel):
-    ref: str
-
-
-class FavAuthReq(BaseModel):
-    username: str
-    pin: str = ""
+    id: int                         # 收藏行 id
 
 
 @app.get("/fav/list")
-def fav_list(x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
-    _check_token(x_api_token)
-    owner = _fav_owner(x_fav_user)
-    return {"owner": owner, "favorites": db.fav_list(owner), "db_enabled": db.enabled()}
+def fav_list(user: dict = Depends(current_user)):
+    """返回所有人的收藏（团队共享可见），带 owner；me 标注当前用户。"""
+    return {"me": user["username"], "role": user["role"],
+            "favorites": db.fav_list_all(), "db_enabled": db.enabled()}
 
 
 @app.post("/fav/add")
-def fav_add(req: FavAddReq, x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
-    _check_token(x_api_token)
-    owner = _fav_owner(x_fav_user)
-    ok = db.fav_add(owner, req.kind, req.ref, req.label or "", req.meta or {})
-    if not ok:
+def fav_add(req: FavAddReq, user: dict = Depends(current_user)):
+    fid = db.fav_add(user["username"], req.kind, req.ref, req.label or "", req.meta or {})
+    if fid is None:
         raise HTTPException(status_code=500, detail="收藏失败（未接数据库？）")
-    return {"ok": True, "owner": owner, "ref": req.ref}
+    return {"ok": True, "id": fid, "owner": user["username"], "ref": req.ref}
 
 
 @app.post("/fav/remove")
-def fav_remove(req: FavRemoveReq, x_api_token: str = Header(default=""), x_fav_user: str = Header(default="")):
-    _check_token(x_api_token)
-    owner = _fav_owner(x_fav_user)
-    return {"ok": True, "removed": db.fav_remove(owner, req.ref)}
+def fav_remove(req: FavRemoveReq, user: dict = Depends(current_user)):
+    return {"ok": True, "removed": db.fav_remove_by_id(req.id, user["username"], user["role"] == "admin")}
 
 
-# 登录脚手架（前端暂不接；将来做登录时启用）
-@app.post("/fav/register")
-def fav_register(req: FavAuthReq, x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
-    ok, msg = db.fav_register(req.username.strip(), req.pin)
+# ── 登录 / 账号 ──────────────────────────────────────────────────
+class LoginReq(BaseModel):
+    username: str
+    pin: str = ""
+    remember: bool = False
+
+
+class ChangePinReq(BaseModel):
+    old_pin: str = ""
+    new_pin: str
+
+
+@app.post("/auth/login")
+def auth_login(req: LoginReq):
+    u = db.user_verify(req.username.strip(), req.pin)
+    if not u:
+        raise HTTPException(status_code=401, detail="用户名或口令错误")
+    token = make_token(u["username"], u["role"], u["pin_ver"], req.remember)
+    return {"ok": True, "token": token, "username": u["username"], "role": u["role"]}
+
+
+@app.get("/auth/me")
+def auth_me(user: dict = Depends(current_user)):
+    return {"username": user["username"], "role": user["role"]}
+
+
+@app.post("/auth/change_pin")
+def auth_change_pin(req: ChangePinReq, user: dict = Depends(current_user)):
+    ok, msg = db.user_change_pin(user["username"], req.old_pin, req.new_pin)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
-    return {"ok": True, "username": req.username.strip()}
+    return {"ok": True}   # 前端应提示重新登录（旧 token 已失效）
 
 
-@app.post("/fav/login")
-def fav_login(req: FavAuthReq, x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
-    if not db.fav_login(req.username.strip(), req.pin):
-        raise HTTPException(status_code=401, detail="用户名或口令错误")
-    return {"ok": True, "username": req.username.strip()}
+# ── 用户管理（仅管理员）──────────────────────────────────────────
+class UserCreateReq(BaseModel):
+    username: str
+    pin: str = ""
+    role: str = "user"
+
+
+class UserNameReq(BaseModel):
+    username: str
+
+
+class UserRoleReq(BaseModel):
+    username: str
+    role: str
+
+
+class UserPinReq(BaseModel):
+    username: str
+    pin: str
+
+
+class UserDisableReq(BaseModel):
+    username: str
+    disabled: bool = True
+
+
+@app.get("/users")
+def users_list(admin: dict = Depends(require_admin)):
+    return {"users": db.user_list()}
+
+
+@app.post("/users")
+def users_create(req: UserCreateReq, admin: dict = Depends(require_admin)):
+    ok, msg = db.user_create(req.username, req.pin, req.role)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
+
+
+@app.post("/users/role")
+def users_role(req: UserRoleReq, admin: dict = Depends(require_admin)):
+    if req.username == admin["username"] and req.role != "admin":
+        raise HTTPException(status_code=400, detail="不能取消自己的管理员权限")
+    ok, msg = db.user_set_role(req.username, req.role)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
+
+
+@app.post("/users/reset_pin")
+def users_reset_pin(req: UserPinReq, admin: dict = Depends(require_admin)):
+    ok, msg = db.user_reset_pin(req.username, req.pin)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
+
+
+@app.post("/users/disable")
+def users_disable(req: UserDisableReq, admin: dict = Depends(require_admin)):
+    if req.username == admin["username"] and req.disabled:
+        raise HTTPException(status_code=400, detail="不能禁用自己")
+    ok, msg = db.user_set_disabled(req.username, req.disabled)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
+
+
+@app.post("/users/delete")
+def users_delete(req: UserNameReq, admin: dict = Depends(require_admin)):
+    if req.username == admin["username"]:
+        raise HTTPException(status_code=400, detail="不能删除自己")
+    if db.user_get(req.username) and db.user_get(req.username).get("role") == "admin" and db.admin_count() <= 1:
+        raise HTTPException(status_code=400, detail="不能删除最后一个管理员")
+    ok, msg = db.user_delete(req.username)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"ok": True}
 
 
 # ── 提示词修改（Gemini 重写 + 翻译，合为一个 prompt_edit 任务）─────────
@@ -859,11 +998,10 @@ def _run_revise_bg(req: "ReviseReq", job_id):
 
 
 @app.post("/prompt/revise")
-def prompt_revise(req: ReviseReq, x_api_token: str = Header(default="")):
-    _check_token(x_api_token)
+def prompt_revise(req: ReviseReq, user: dict = Depends(current_user)):
     if req.ptype not in ("shot", "common", "video"):
         raise HTTPException(status_code=400, detail="ptype 必须为 shot/common/video")
     ref = f"{req.ad or '共性'}" + (f"#{req.idx}" if req.idx is not None else "")
-    job_id = db.start_job("prompt_edit", req.project_id, ref, batch=req.batch or "")
+    job_id = db.start_job("prompt_edit", req.project_id, ref, batch=req.batch or "", owner=user["username"])
     threading.Thread(target=_run_revise_bg, args=(req, job_id), daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id}
