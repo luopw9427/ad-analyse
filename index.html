@@ -313,7 +313,7 @@
   <div id="drawerGrip" title="拖动调整宽度"></div>
   <div id="drawerToolbar">
     <button class="iconbtn" id="dic-all" title="全部结果" onclick="setDrawerMode('all')">▤</button>
-    <button class="iconbtn" id="dic-fav" title="我的收藏" onclick="setDrawerMode('fav')">★</button>
+    <button class="iconbtn" id="dic-fav" title="收藏（个人 / 团队）" onclick="setDrawerMode('fav')">★</button>
     <span style="flex:1"></span>
     <button class="iconbtn" id="dic-full" title="全屏 / 退出全屏" onclick="toggleDrawerFull()">⛶</button>
     <button class="iconbtn" title="关闭结果栏" onclick="closeDrawer()">✕</button>
@@ -632,6 +632,8 @@ let _favSet=new Set();    // 当前用户已收藏的 ref 集合
 let _favMine={};          // ref -> 我的收藏行 id
 let _favData=[];          // 全部收藏（含所有人，带 owner）
 let _drawerMode='all';    // 右边栏视图：all 全部结果 / fav 收藏
+let _favScope='mine';     // 收藏子视图：mine 个人收藏 / team 团队收藏
+function setFavScope(s){_favScope=s;renderDrawer();}
 async function loadFavs(){
   try{const r=await fetch('/fav/list',{headers:headers()});if(r.status===401){onAuthFail();throw 0}if(!r.ok)throw 0;
     const d=await r.json();_favData=d.favorites||[];
@@ -891,7 +893,11 @@ function drawerAll(open){document.querySelectorAll('#drawer details').forEach(d=
 function renderDrawer(){
   _enReg={};            // 重建面板前清空英文待填登记，避免指向已弃用的旧节点
   const dr=$('#drawerBody');
-  if(_drawerMode==='fav'){dr.innerHTML='<h2 style="margin:0 0 10px">我的收藏</h2>';renderFavInto(dr);return;}
+  if(_drawerMode==='fav'){
+    dr.innerHTML='<div class="bi-tabs" style="margin:0 0 12px">'
+      +'<button class="'+(_favScope==='mine'?'on':'')+'" onclick="setFavScope(\'mine\')">个人收藏</button>'
+      +'<button class="'+(_favScope==='team'?'on':'')+'" onclick="setFavScope(\'team\')">团队收藏</button></div>';
+    renderFavInto(dr);return;}
   dr.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">'
     +'<h2 style="margin:0">全部结果</h2>'
     +'<div><button class="mini" onclick="drawerAll(true)">全部展开</button>'
@@ -901,12 +907,15 @@ function renderDrawer(){
   if(!bs.length){dr.innerHTML+='<div class="muted">该项目暂无批次</div>';return}
   bs.forEach(b=>dr.appendChild(drawerBatch(b)));
 }
-// 收藏视图：按类型分组
+// 收藏视图：个人=只看自己的，团队=所有人的；再按类型分组
 function renderFavInto(dr){
-  if(!_favData.length){const p=document.createElement('div');p.className='muted';p.style.padding='6px';p.textContent='还没有收藏。在任务行、视频切片、提示词上点 ☆ 即可收藏。';dr.appendChild(p);return;}
+  const data=(_favScope==='mine')?_favData.filter(f=>f.owner===_user):_favData;
+  if(!data.length){const p=document.createElement('div');p.className='muted';p.style.padding='6px';
+    p.textContent=(_favScope==='mine')?'你还没有收藏。在任务行、视频切片、提示词上点 ☆ 即可收藏。':'团队还没有收藏。';
+    dr.appendChild(p);return;}
   const groups=[['task','任务'],['clip','视频片段'],['prompt','提示词']];
   groups.forEach(([kind,name])=>{
-    const items=_favData.filter(f=>f.kind===kind);if(!items.length)return;
+    const items=data.filter(f=>f.kind===kind);if(!items.length)return;
     const h=document.createElement('div');h.className='fav-kind-h';h.textContent=name+'（'+items.length+'）';dr.appendChild(h);
     items.forEach(f=>dr.appendChild(favRow(f)));
   });
