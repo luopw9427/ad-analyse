@@ -176,16 +176,22 @@
   #clipPipBar .x:hover{background:rgba(255,255,255,.16)}
   #clipPip video{width:100%;display:block;background:#000;max-height:56vh}
   /* 登录页 + 弹窗 */
-  #loginMask{position:fixed;inset:0;z-index:200;background:linear-gradient(180deg,#eef2f8,#e4e9f2);display:none;align-items:center;justify-content:center}
+  #loginMask{position:fixed;inset:0;z-index:200;background:radial-gradient(1200px 600px at 50% -10%,#f2f6fd,#e4e9f2);display:none;align-items:center;justify-content:center}
   #loginMask.on{display:flex}
-  .authcard{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:28px 30px;width:340px;box-shadow:var(--sh)}
-  .authcard h2{margin:0 0 6px;font-size:18px}
-  .authcard .sub{color:var(--muted);font-size:12.5px;margin-bottom:16px}
-  .authcard label{display:block;font-size:12px;color:var(--sub);margin:10px 0 4px}
-  .authcard input[type=text],.authcard input[type=password]{width:100%}
-  .authcard .row2{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:13px;color:var(--sub)}
-  .authcard button.primary{width:100%;margin-top:16px}
-  .autherr{color:var(--pain);font-size:12.5px;margin-top:10px;min-height:16px}
+  .authcard{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:34px 34px 30px;width:360px;
+    box-shadow:0 24px 60px rgba(16,24,40,.14),0 2px 8px rgba(16,24,40,.06);position:relative;overflow:hidden}
+  .authcard::before{content:"";position:absolute;top:0;left:0;right:0;height:4px;background:linear-gradient(90deg,#2f6bed,#5a52d8)}
+  .auth-brand{font-size:22px;font-weight:800;letter-spacing:.3px;text-align:center;
+    background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .authcard .sub{color:var(--muted);font-size:12.5px;margin:6px 0 20px;text-align:center}
+  .authcard label{display:block;font-size:12px;color:var(--sub);margin:14px 0 5px}
+  .authcard input[type=text],.authcard input[type=password]{width:100%;padding:10px 12px}
+  .remember-row{display:flex;justify-content:flex-end;align-items:center;gap:7px;margin-top:14px;font-size:12.5px;color:var(--sub);user-select:none}
+  .remember-row input{accent-color:var(--accent);width:15px;height:15px}
+  .authcard button.primary{width:100%;margin-top:18px;padding:11px;font-size:14px;letter-spacing:2px;
+    background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff;border:0}
+  .authcard button.primary:hover{filter:brightness(1.05);background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff}
+  .autherr{color:var(--pain);font-size:12.5px;margin-top:10px;min-height:16px;text-align:center}
   .modal{position:fixed;inset:0;z-index:150;background:rgba(16,24,40,.45);display:none;align-items:center;justify-content:center}
   .modal.on{display:flex}
   .modal .box{background:var(--panel);border-radius:14px;padding:20px 22px;width:min(560px,92vw);max-height:82vh;overflow:auto;box-shadow:var(--sh);position:relative}
@@ -300,14 +306,14 @@
 <div id="clipPip"><div id="clipPipBar"><span>原镜头片段</span><button class="x" onclick="closeClip()">✕</button></div><video id="clipVideo" controls playsinline></video></div>
 
 <div id="loginMask"><div class="authcard">
-  <h2>视频广告分析</h2>
+  <div class="auth-brand">视频广告分析</div>
   <div class="sub">请登录后使用</div>
   <label>用户名</label>
   <input id="lg_user" type="text" autocomplete="username" placeholder="用户名">
   <label>口令</label>
   <input id="lg_pin" type="password" autocomplete="current-password" placeholder="口令" onkeydown="if(event.key==='Enter')doLogin()">
-  <div class="row2"><input type="checkbox" id="lg_remember"><label for="lg_remember" style="margin:0">记住登录状态（本电脑长期免登）</label></div>
-  <button class="primary" onclick="doLogin()">登录</button>
+  <div class="remember-row"><label for="lg_remember" style="margin:0;cursor:pointer">记住登录状态</label><input type="checkbox" id="lg_remember"></div>
+  <button class="primary" onclick="doLogin()">登 录</button>
   <div class="autherr" id="lg_err"></div>
 </div></div>
 
