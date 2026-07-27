@@ -379,7 +379,9 @@ async function doAnalyze(){
 const IC={
   copy:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></svg>',
   dl:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v11"/><path d="M7.5 10l4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg>',
-  ok:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>'};
+  ok:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12.5l5 5L20 6.5"/></svg>',
+  expand:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>',
+  shrink:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>'};
 function markDone(btn){        // 成功后变勾；鼠标离开或 2s 后恢复
   const o=btn.dataset.ic||btn.innerHTML;btn.dataset.ic=o;btn.innerHTML=IC.ok;btn.classList.add('done-ic');
   const revert=()=>{btn.innerHTML=o;btn.classList.remove('done-ic');btn.removeEventListener('mouseleave',revert);clearTimeout(tm);};
@@ -804,7 +806,7 @@ function updTab(){   // 高亮当前视图图标 + 全屏图标状态
   const a=$('#dic-all'),f=$('#dic-fav'),fu=$('#dic-full');
   if(a)a.classList.toggle('on',_drawerMode==='all');
   if(f)f.classList.toggle('on',_drawerMode==='fav');
-  if(fu){fu.textContent=_drawerFull?'⤡':'⤢';fu.title=_drawerFull?'缩小':'放大';}
+  if(fu){fu.innerHTML=_drawerFull?IC.shrink:IC.expand;fu.title=_drawerFull?'缩小':'放大';}
 }
 function updEdgeTabs(){updTab();}
 function openDrawer(){
