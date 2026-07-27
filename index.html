@@ -606,8 +606,12 @@ async function loadJobs(){
          <div style="margin-top:4px;color:var(--muted)">分析为 OpenRouter 实际扣费；GPU 拆分为估算（带 ≈）</div>
        </div>`;
     wireObjScroll();wireFavStars();
+    // 只要还有 running 任务（含分析后自动起的翻译任务），4 秒后自动再刷新，直到全部结束
+    clearTimeout(_jobsTimer);
+    if(d.jobs.some(j=>j.status==='running'))_jobsTimer=setTimeout(loadJobs,4000);
   }catch(e){$('#jobs').innerHTML='<span class="muted">加载失败：'+e.message+'</span>'}
 }
+let _jobsTimer=null;
 function wireFavStars(){
   document.querySelectorAll('#jobs .fav-star').forEach(s=>{
     s.onclick=e=>{e.stopPropagation();e.preventDefault();
@@ -800,7 +804,7 @@ function updTab(){   // 高亮当前视图图标 + 全屏图标状态
   const a=$('#dic-all'),f=$('#dic-fav'),fu=$('#dic-full');
   if(a)a.classList.toggle('on',_drawerMode==='all');
   if(f)f.classList.toggle('on',_drawerMode==='fav');
-  if(fu){fu.textContent=_drawerFull?'↘':'⛶';fu.title=_drawerFull?'退出全屏':'全屏';}
+  if(fu){fu.textContent=_drawerFull?'⤡':'⤢';fu.title=_drawerFull?'缩小':'放大';}
 }
 function updEdgeTabs(){updTab();}
 function openDrawer(){
@@ -822,9 +826,10 @@ function wireDrawer(){
   updTab();
   const grip=$('#drawerGrip');
   if(grip){
-    grip.addEventListener('mousedown',e=>{if(_drawerFull)return;_dragging=true;e.preventDefault();document.body.style.userSelect='none';});
+    grip.addEventListener('mousedown',e=>{_dragging=true;e.preventDefault();document.body.style.userSelect='none';});
     window.addEventListener('mousemove',e=>{if(!_dragging)return;
-      let w=window.innerWidth-e.clientX;w=Math.max(300,Math.min(w,window.innerWidth*0.85));
+      if(_drawerFull){_drawerFull=false;document.body.classList.remove('drawer-full');updTab();}  // 全屏时拖动即退出全屏并按宽度缩放
+      let w=window.innerWidth-e.clientX;w=Math.max(300,Math.min(w,window.innerWidth*0.95));
       document.documentElement.style.setProperty('--drawer-w',w+'px');});
     window.addEventListener('mouseup',()=>{if(!_dragging)return;_dragging=false;document.body.style.userSelect='';});
   }
