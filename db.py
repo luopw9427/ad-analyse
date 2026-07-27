@@ -27,7 +27,7 @@ def _pin_hash(pin: str) -> str:
 
 
 def _pin_verify(pin: str, stored: str) -> bool:
-    """校验口令。兼容旧版单 sha256（迁移期用）。"""
+    """校验密码。兼容旧版单 sha256（迁移期用）。"""
     if not stored:
         return False
     try:
@@ -262,7 +262,7 @@ def fav_user_ensure(username: str, pin: str = "", role: str = "user") -> bool:
 
 
 def user_ensure_admin(username: str, pin: str) -> bool:
-    """预置管理员：不存在则以 admin 建；已存在则确保其 role=admin（不改口令）。"""
+    """预置管理员：不存在则以 admin 建；已存在则确保其 role=admin（不改密码）。"""
     if not enabled() or not username:
         return False
     try:
@@ -298,7 +298,7 @@ def user_get(username: str):
 
 
 def user_verify(username: str, pin: str):
-    """校验用户名+口令。成功返回用户 dict（不含 pin_hash），并把旧格式口令透明升级为 PBKDF2；失败返回 None。"""
+    """校验用户名+密码。成功返回用户 dict（不含 pin_hash），并把旧格式密码透明升级为 PBKDF2；失败返回 None。"""
     u = user_get(username)
     if not u or u["disabled"]:
         return None
@@ -361,7 +361,7 @@ def user_set_role(username: str, role: str) -> tuple:
 
 
 def user_reset_pin(username: str, pin: str) -> tuple:
-    """管理员重置口令：改哈希并 pin_ver+1（旧 token 失效）。"""
+    """管理员重置密码：改哈希并 pin_ver+1（旧 token 失效）。"""
     if not enabled():
         return False, "未接数据库"
     try:
@@ -375,12 +375,12 @@ def user_reset_pin(username: str, pin: str) -> tuple:
 
 
 def user_change_pin(username: str, old_pin: str, new_pin: str) -> tuple:
-    """用户自助改口令：校验旧口令，改哈希并 pin_ver+1。"""
+    """用户自助改密码：校验旧密码，改哈希并 pin_ver+1。"""
     u = user_get(username)
     if not u:
         return False, "用户不存在"
     if not _pin_verify(old_pin, u["pin_hash"]):
-        return False, "原口令不正确"
+        return False, "原密码不正确"
     try:
         with _conn() as c:
             c.execute("UPDATE fav_users SET pin_hash=%s, pin_ver=COALESCE(pin_ver,1)+1 WHERE username=%s",

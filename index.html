@@ -201,6 +201,18 @@
   .utable td,.utable th{padding:7px 8px}
   .rolechip{font-size:11px;padding:1px 8px;border-radius:20px;background:var(--accent-weak);color:var(--accent)}
   .rolechip.user{background:var(--panel-2);color:var(--sub)}
+  /* 头像 + 悬停菜单 */
+  .usermenu{position:relative}
+  .avatar{width:34px;height:34px;border-radius:50%;border:0;padding:0;cursor:pointer;font-weight:700;font-size:15px;color:#fff;
+    display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#2f6bed,#5a52d8);box-shadow:var(--sh-sm)}
+  .avatar:hover{filter:brightness(1.06);background:linear-gradient(135deg,#2f6bed,#5a52d8);color:#fff}
+  .usermenu-pop{position:absolute;right:0;top:100%;margin-top:8px;min-width:180px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;box-shadow:var(--sh);padding:6px;display:none;z-index:60}
+  .usermenu:hover .usermenu-pop{display:block}
+  .um-head{padding:7px 10px 9px;border-bottom:1px solid var(--line);margin-bottom:4px;font-size:13px}
+  .um-item{display:block;width:100%;text-align:left;background:transparent;border:0;box-shadow:none;padding:9px 10px;
+    border-radius:8px;font-size:13px;color:var(--ink);cursor:pointer;font-weight:500}
+  .um-item:hover{background:var(--accent-weak);color:var(--accent)}
 </style>
 </head>
 <body>
@@ -219,12 +231,17 @@
          title="一批广告用同一个项目名。R2 里按 projects/{项目名}/{广告}/ 存放，分析和横向对比也按项目为单位">
   <button onclick="loadAll()">加载结果</button>
   <span id="status" class="muted"></span>
-  <span id="userbox" style="margin-left:auto;display:flex;gap:8px;align-items:center">
-    <span class="muted" id="whoami" title="当前登录用户"></span>
-    <button class="mini" id="btnUsers" style="display:none" onclick="openUsers()">用户管理</button>
-    <button class="mini" onclick="openChangePin()">改口令</button>
-    <button class="mini" onclick="doLogout()">退出</button>
-    <button class="mini" onclick="location.href='/prompts'" title="自定义各环节分析提示词（存本机浏览器）">提示词修改</button>
+  <span id="userbox" style="margin-left:auto;display:flex;gap:12px;align-items:center">
+    <button onclick="location.href='/prompts'" title="自定义各环节分析提示词（存本机浏览器）">提示词修改</button>
+    <div id="userMenu" class="usermenu">
+      <button class="avatar" id="avatarBtn" title="账号">U</button>
+      <div class="usermenu-pop">
+        <div class="um-head"><b id="um-name"></b> <span id="um-role" class="muted"></span></div>
+        <button class="um-item" onclick="openPersonal()">个人中心</button>
+        <button class="um-item" onclick="openAccount()">账号设置</button>
+        <button class="um-item" id="um-users" style="display:none" onclick="openUsers()">用户管理</button>
+      </div>
+    </div>
   </span>
 </header>
 <div id="scroll">
@@ -310,8 +327,8 @@
   <div class="sub">请登录后使用</div>
   <label>用户名</label>
   <input id="lg_user" type="text" autocomplete="username" placeholder="用户名">
-  <label>口令</label>
-  <input id="lg_pin" type="password" autocomplete="current-password" placeholder="口令" onkeydown="if(event.key==='Enter')doLogin()">
+  <label>密码</label>
+  <input id="lg_pin" type="password" autocomplete="current-password" placeholder="密码" onkeydown="if(event.key==='Enter')doLogin()">
   <div class="remember-row"><label for="lg_remember" style="margin:0;cursor:pointer">记住登录状态</label><input type="checkbox" id="lg_remember"></div>
   <button class="primary" onclick="doLogin()">登 录</button>
   <div class="autherr" id="lg_err"></div>
@@ -322,19 +339,32 @@
   <h3>用户管理</h3>
   <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
     <input id="nu_user" type="text" placeholder="用户名" size="10">
-    <input id="nu_pin" type="text" placeholder="初始口令" size="10">
+    <input id="nu_pin" type="text" placeholder="初始密码" size="10">
     <select id="nu_role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
     <button class="mini" onclick="createUser()">新建用户</button>
   </div>
   <div id="usersList"></div>
 </div></div>
 
+<div id="accountModal" class="modal"><div class="box" style="width:min(340px,92vw)">
+  <button class="mini x" onclick="closeAccount()">✕</button>
+  <h3>账号设置</h3>
+  <button class="mini" style="display:block;width:100%;margin:8px 0" onclick="closeAccount();openChangePin()">修改密码</button>
+  <button class="mini del" style="display:block;width:100%" onclick="doLogout()">退出当前账号</button>
+</div></div>
+
+<div id="personalModal" class="modal"><div class="box">
+  <button class="mini x" onclick="closePersonal()">✕</button>
+  <h3>个人中心</h3>
+  <div id="personalBody"></div>
+</div></div>
+
 <div id="pinModal" class="modal"><div class="box" style="width:min(360px,92vw)">
   <button class="mini x" onclick="closePin()">✕</button>
-  <h3>修改口令</h3>
-  <label style="font-size:12px;color:var(--sub)">原口令</label>
+  <h3>修改密码</h3>
+  <label style="font-size:12px;color:var(--sub)">原密码</label>
   <input id="cp_old" type="password" style="width:100%;margin:4px 0 10px">
-  <label style="font-size:12px;color:var(--sub)">新口令</label>
+  <label style="font-size:12px;color:var(--sub)">新密码</label>
   <input id="cp_new" type="password" style="width:100%;margin:4px 0 10px">
   <div class="autherr" id="cp_err"></div>
   <button class="mini" onclick="changePin()">确认修改</button>
@@ -354,7 +384,11 @@ function _saveToken(t,remember){_token=t;try{if(remember){localStorage.setItem('
 function _clearToken(){_token=null;try{localStorage.removeItem('authToken');sessionStorage.removeItem('authToken')}catch(e){}}
 function showLogin(){$('#loginMask').classList.add('on')}
 function hideLogin(){$('#loginMask').classList.remove('on')}
-function applyUser(u,r){_user=u;_role=r;$('#whoami').textContent=u+'（'+(r==='admin'?'管理员':'成员')+'）';$('#btnUsers').style.display=(r==='admin'?'':'none')}
+function applyUser(u,r){_user=u;_role=r;
+  const nm=$('#um-name');if(nm)nm.textContent=u;
+  const rl=$('#um-role');if(rl)rl.textContent=(r==='admin'?'· 管理员':'');   // 成员不显示角色
+  const av=$('#avatarBtn');if(av)av.textContent=(u||'?').slice(0,1).toUpperCase();
+  const uu=$('#um-users');if(uu)uu.style.display=(r==='admin'?'':'none');}
 async function doLogin(){
   const err=$('#lg_err');err.textContent='';
   const username=$('#lg_user').value.trim(),pin=$('#lg_pin').value,remember=$('#lg_remember').checked;
@@ -376,17 +410,39 @@ async function bootAuth(){
     const d=await r.json();applyUser(d.username,d.role);hideLogin();afterLogin();
   }catch(e){_clearToken();showLogin()}
 }
-// 改口令
+// 改密码
 function openChangePin(){$('#cp_err').textContent='';$('#cp_old').value='';$('#cp_new').value='';$('#pinModal').classList.add('on')}
 function closePin(){$('#pinModal').classList.remove('on')}
 async function changePin(){
   const err=$('#cp_err');err.textContent='';
   const old_pin=$('#cp_old').value,new_pin=$('#cp_new').value;
-  if(!new_pin){err.textContent='请输入新口令';return}
+  if(!new_pin){err.textContent='请输入新密码';return}
   try{const r=await fetch('/auth/change_pin',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify({old_pin,new_pin})});
     const d=await r.json().catch(()=>({}));if(!r.ok||!d.ok){err.textContent=(d&&d.detail)||'修改失败';return}
-    closePin();alert('口令已修改，请重新登录');doLogout();
+    closePin();alert('密码已修改，请重新登录');doLogout();
   }catch(e){err.textContent='修改失败：'+e.message}
+}
+// 账号设置
+function openAccount(){$('#accountModal').classList.add('on')}
+function closeAccount(){$('#accountModal').classList.remove('on')}
+// 个人中心：自己的配置 / 任务 / 收藏
+function closePersonal(){$('#personalModal').classList.remove('on')}
+async function openPersonal(){
+  const box=$('#personalBody');box.innerHTML='<div class="muted">加载中…</div>';
+  $('#personalModal').classList.add('on');
+  let jobs=[];try{const d=await api('/jobs?limit=200');jobs=(d.jobs||[]).filter(j=>j.owner===_user)}catch(e){}
+  try{await loadFavs()}catch(e){}
+  const favs=(_favData||[]).filter(f=>f.owner===_user);
+  const kmap={task:'任务',prompt:'提示词',clip:'切片'};
+  let h='<div style="margin-bottom:12px"><b style="font-size:15px">'+_user+'</b> <span class="rolechip '+(_role==='admin'?'':'user')+'">'+(_role==='admin'?'管理员':'成员')+'</span></div>';
+  h+='<div class="fav-kind-h">我的任务（'+jobs.length+'）</div>';
+  h+=jobs.length?('<div style="max-height:150px;overflow:auto">'+jobs.slice(0,60).map(j=>'<div class="muted" style="font-size:12.5px;padding:2px 0">#'+j.id+' '+kindLabel(j.kind)+' · '+(j.batch||'-')+' · '+j.status+'</div>').join('')+'</div>'):'<div class="muted">暂无</div>';
+  h+='<div class="fav-kind-h">我的收藏（'+favs.length+'）</div>';
+  h+=favs.length?('<div style="max-height:150px;overflow:auto">'+favs.slice(0,60).map(f=>'<div class="muted" style="font-size:12.5px;padding:2px 0">['+(kmap[f.kind]||f.kind)+'] '+(f.label||f.ref)+'</div>').join('')+'</div>'):'<div class="muted">暂无</div>';
+  h+='<div class="fav-kind-h">我的配置</div><div class="muted" style="font-size:12.5px;line-height:1.7">'
+    +'当前项目：'+(proj()||'-')+'<br>OpenRouter Key：'+($('#orkey').value?'已自填（本机）':'用服务端')
+    +'<br>DeepSeek Key：'+($('#dskey').value?'已自填（本机）':'用服务端')+'</div>';
+  box.innerHTML=h;
 }
 // 用户管理（管理员）
 function openUsers(){$('#usersModal').classList.add('on');renderUsers()}
@@ -400,7 +456,7 @@ async function renderUsers(){
        +'<td><span class="rolechip '+(u.role==='admin'?'':'user')+'">'+(u.role==='admin'?'管理员':'成员')+'</span></td>'
        +'<td class="muted">'+(u.disabled?'已禁用':'正常')+'</td><td>'
        +(me?'':'<button class="mini" onclick="setRole(\''+u.username+'\',\''+(u.role==='admin'?'user':'admin')+'\')">'+(u.role==='admin'?'降为成员':'升为管理员')+'</button>')
-       +'<button class="mini" onclick="resetPin(\''+u.username+'\')">重置口令</button>'
+       +'<button class="mini" onclick="resetPin(\''+u.username+'\')">重置密码</button>'
        +(me?'':'<button class="mini" onclick="toggleDisable(\''+u.username+'\','+(u.disabled?'false':'true')+')">'+(u.disabled?'启用':'禁用')+'</button>')
        +(me?'':'<button class="mini del" onclick="delUser(\''+u.username+'\')">删除</button>')
        +'</td></tr>';});
@@ -409,7 +465,7 @@ async function renderUsers(){
 }
 async function createUser(){const username=$('#nu_user').value.trim(),pin=$('#nu_pin').value,role=$('#nu_role').value;if(!username){alert('填用户名');return}if(await _uPost('/users',{username,pin,role})){$('#nu_user').value='';$('#nu_pin').value='';renderUsers()}}
 async function setRole(username,role){if(await _uPost('/users/role',{username,role}))renderUsers()}
-async function resetPin(username){const pin=prompt('给「'+username+'」设置新口令：');if(pin==null)return;if(await _uPost('/users/reset_pin',{username,pin}))alert('已重置')}
+async function resetPin(username){const pin=prompt('给「'+username+'」设置新密码：');if(pin==null)return;if(await _uPost('/users/reset_pin',{username,pin}))alert('已重置')}
 async function toggleDisable(username,disabled){if(await _uPost('/users/disable',{username,disabled}))renderUsers()}
 async function delUser(username){if(!confirm('删除用户 '+username+'？'))return;if(await _uPost('/users/delete',{username}))renderUsers()}
 const setStatus=t=>$('#status').textContent=t||'';
@@ -445,7 +501,7 @@ async function doSplit(){
   remember();const files=$('#files').files;
   const total=files.length+_urlList.length;
   if(!total){alert('先选视频文件或粘贴视频 URL');return}
-  if(!tok()){alert('先填访问口令');return}
+  if(!tok()){alert('先填访问密码');return}
   $('#btnSplit').disabled=true;
   const batch=await genBatchId();_curBatch=batch;localStorage.setItem('curBatch',batch);
   logOps('▶ 本次批次：'+batch+'（'+files.length+' 本地 + '+_urlList.length+' URL，合为一个任务）');
@@ -467,7 +523,7 @@ async function doSplit(){
 }
 
 async function doAnalyze(){
-  remember();if(!tok()){alert('先填访问口令');return}
+  remember();if(!tok()){alert('先填访问密码');return}
   $('#btnAnalyze').disabled=true;
   const batch=_curBatch||localStorage.getItem('curBatch')||'';
   if(!batch){ if(!confirm('本次没有先上传拆分，未指定批次。\n确定分析整个项目（会把项目内所有批次一起归纳共性）？'))return; }
@@ -645,7 +701,7 @@ function focusBatch(batch){
 }
 
 async function delJob(id,kind,ref,batch){
-  if(!tok()){alert('先填访问口令');return}
+  if(!tok()){alert('先填访问密码');return}
   let msg,delReq=null;
   if(kind==='split'&&ref){
     msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将删除该广告在 R2 的全部文件（切片+分析产物+原视频），不可恢复。确定？';
@@ -672,7 +728,7 @@ async function delJob(id,kind,ref,batch){
 }
 
 async function doDelete(single,analysisOnly){
-  remember();if(!tok()){alert('先填访问口令');return}
+  remember();if(!tok()){alert('先填访问密码');return}
   const ad=single?$('#delAd').value.trim():'';
   if(single&&!ad){alert('先填要删除的广告名');return}
   const what=analysisOnly?'分析产物':(single?('广告 '+ad+' 的全部文件'):('整个项目 '+proj()+' 的全部文件'));
@@ -686,7 +742,7 @@ async function doDelete(single,analysisOnly){
   }catch(e){logOps('✗ 删除失败 '+e.message)}
 }
 async function doDeleteBatch(){
-  remember();if(!tok()){alert('先填访问口令');return}
+  remember();if(!tok()){alert('先填访问密码');return}
   const b=$('#delBatch').value.trim();if(!b){alert('先填批次 id');return}
   if(!confirm('删除批次 '+b+' 的全部文件（切片+分析产物+共性+原视频）及该批次任务记录？不可恢复。'))return;
   try{
@@ -1009,7 +1065,7 @@ function downloadObj(obj,filename){
   a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
 }
 async function downloadBatch(batch){
-  if(!tok()){alert('先填访问口令');return}
+  if(!tok()){alert('先填访问密码');return}
   setStatus('打包整批 '+batch+' …');logOps('▶ 打包整批 '+batch+' …');
   try{
     const q='/download?project_id='+encodeURIComponent(proj())+'&batch='+encodeURIComponent(batch);
@@ -1022,7 +1078,7 @@ async function downloadBatch(batch){
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
 }
 async function downloadAd(batch,ad){
-  if(!tok()){alert('先填访问口令');return}
+  if(!tok()){alert('先填访问密码');return}
   setStatus('打包下载 '+ad+' …');logOps('▶ 打包下载 '+ad+' …');
   try{
     const q='/download?project_id='+encodeURIComponent(proj())+'&ad_id='+encodeURIComponent(ad)+(batch?('&batch='+encodeURIComponent(batch)):'');
@@ -1094,7 +1150,7 @@ function sellingChips(cur){
   render();box._get=()=>items.slice();return box;
 }
 async function doRevise(ptype,ctx,sellingBox,ta,btn){
-  if(!tok()){alert('先填访问口令');return}
+  if(!tok()){alert('先填访问密码');return}
   const instruction=(ta.value||'').trim();
   let selling=null;
   if(sellingBox){selling=sellingBox._get();}

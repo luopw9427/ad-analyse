@@ -93,7 +93,7 @@ def _startup():
         db.user_ensure_admin(ADMIN_USER, ADMIN_PIN)          # 预置管理员（方案 A）
     elif db.admin_count() == 0:
         db.fav_user_ensure(FAV_DEFAULT_USER, "", role="admin")  # 无管理员则把 default 设为管理员，供首次进入建号
-        print("[auth] 未配置 ADMIN_USER/ADMIN_PIN，已把 default（空口令）设为临时管理员，请尽快登录并创建正式管理员")
+        print("[auth] 未配置 ADMIN_USER/ADMIN_PIN，已把 default（空密码）设为临时管理员，请尽快登录并创建正式管理员")
 
 
 # ── 签名 token（无状态，HMAC-SHA256）──────────────────────────────
@@ -779,7 +779,7 @@ class ChangePinReq(BaseModel):
 def auth_login(req: LoginReq):
     u = db.user_verify(req.username.strip(), req.pin)
     if not u:
-        raise HTTPException(status_code=401, detail="用户名或口令错误")
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = make_token(u["username"], u["role"], u["pin_ver"], req.remember)
     return {"ok": True, "token": token, "username": u["username"], "role": u["role"]}
 
