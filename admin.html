@@ -115,19 +115,28 @@ async function resetPin(u){const pin=prompt('给「'+u+'」设新密码：');if(
 async function setDisable(u,d){if(await _post('/users/disable',{username:u,disabled:d}))renderUsers()}
 async function delUser(u){if(!confirm('删除用户 '+u+'？'))return;if(await _post('/users/delete',{username:u}))renderUsers()}
 
-// 审计日志
+// 审计日志：登录日志 / 操作日志 分开
+const LOGIN_ACTS=['login','login_first','login_fail'];
+let AUDT='login';
+function setAudt(t){AUDT=t;renderAudit()}
 async function renderAudit(){
   const box=$('#tabbody');
-  let h='<h3>登录 / 操作日志（含 IP、时间、操作人、动作）</h3>'
-   +'<div style="margin-bottom:10px"><button class="mini" onclick="renderAudit()">刷新</button></div>';
-  try{const d=await api('/admin/audit?limit=300');
-    h+='<div class="scroll"><table><thead><tr><th>时间</th><th>用户</th><th>IP</th><th>动作</th><th>详情</th></tr></thead><tbody>';
-    (d.audit||[]).forEach(a=>{const m=ACT[a.action]||[a.action,''];
+  const sub='<div class="tabs">'
+    +'<button class="'+(AUDT==='login'?'on':'')+'" onclick="setAudt(\'login\')">登录日志</button>'
+    +'<button class="'+(AUDT==='op'?'on':'')+'" onclick="setAudt(\'op\')">操作日志</button>'
+    +'<button class="mini" style="margin-left:6px" onclick="renderAudit()">刷新</button></div>';
+  const title=(AUDT==='login')?'登录日志（谁 / 何时 / 什么 IP / 成功或失败）':'操作日志（建号、改角色、删除等，含 IP）';
+  box.innerHTML='<h3>'+title+'</h3>'+sub+'<div id="auditbody"><div class="muted">加载中…</div></div>';
+  try{const d=await api('/admin/audit?limit=400');
+    const rows=(d.audit||[]).filter(a=>AUDT==='login'?LOGIN_ACTS.includes(a.action):!LOGIN_ACTS.includes(a.action));
+    let h='<div class="scroll"><table><thead><tr><th>时间</th><th>用户</th><th>IP</th><th>动作</th><th>详情</th></tr></thead><tbody>';
+    if(!rows.length)h+='<tr><td colspan="5" class="muted">暂无</td></tr>';
+    rows.forEach(a=>{const m=ACT[a.action]||[a.action,''];
       h+='<tr><td class="muted">'+(a.ts||'').slice(0,19)+'</td><td>'+(a.username||'-')+'</td>'
        +'<td class="muted">'+(a.ip||'-')+'</td><td><span class="actchip '+m[1]+'">'+m[0]+'</span></td>'
        +'<td class="muted">'+((a.detail||'')+'').replace(/</g,'&lt;')+'</td></tr>';});
-    h+='</tbody></table></div>';box.innerHTML=h;
-  }catch(e){box.innerHTML=h+'<div class="muted">加载失败：'+e.message+'</div>'}
+    h+='</tbody></table></div>';$('#auditbody').innerHTML=h;
+  }catch(e){$('#auditbody').innerHTML='<div class="muted">加载失败：'+e.message+'</div>'}
 }
 
 // 数据库管理（按成员 / 分组 查看，可删行）
