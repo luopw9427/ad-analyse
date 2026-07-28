@@ -2,7 +2,7 @@
 任务记录（Postgres）
 ====================
 
-记录每次 split / analyze 任务：类型、项目、状态、耗时、产物前缀、错误。
+记录每次 split / analyze 任务：类型、分组、状态、耗时、产物前缀、错误。
 DATABASE_URL 未配置时全部降级为 no-op，不影响服务运行（本地/未接库时安全）。
 Railway 加 Postgres 后会自动注入 DATABASE_URL。
 """
@@ -228,16 +228,21 @@ def delete_job(job_id: int, requester: str = "", is_admin: bool = False) -> int:
         return 0
 
 
-def delete_jobs(project_id: str = "", batch: str = "") -> int:
-    """删除任务记录：给了 batch 只删该批次；给了 project_id 删该项目；都没给清空。"""
+def delete_jobs(project_id: str = "", batch: str = "", owner: str = "") -> int:
+    """删除任务记录：给了 owner 只删该用户；给了 batch 只删该批次；给了 project_id 删该分组；都没给清空。"""
     if not enabled():
         return 0
     try:
         with _conn() as c:
-            if project_id and batch:
-                cur = c.execute("DELETE FROM jobs WHERE project_id=%s AND batch=%s", (project_id, batch))
-            elif project_id:
-                cur = c.execute("DELETE FROM jobs WHERE project_id=%s", (project_id,))
+            conds, args = [], []
+            if project_id:
+                conds.append("project_id=%s"); args.append(project_id)
+            if batch:
+                conds.append("batch=%s"); args.append(batch)
+            if owner:
+                conds.append("owner=%s"); args.append(owner)
+            if conds:
+                cur = c.execute("DELETE FROM jobs WHERE " + " AND ".join(conds), tuple(args))
             else:
                 cur = c.execute("DELETE FROM jobs")
             n = cur.rowcount
@@ -436,6 +441,19 @@ def audit(username: str, ip: str, action: str, detail: str = ""):
         print(f"[db] audit 失败: {e}")
 
 
+def audit_has_login(username: str) -> bool:
+    """该用户是否已有过成功登录记录（用于区分"首次登录"）。"""
+    if not enabled() or not username:
+        return False
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT 1 FROM audit_log WHERE username=%s AND action IN ('login','login_first') LIMIT 1",
+                          (username,)).fetchone()
+        return bool(r)
+    except Exception:
+        return False
+
+
 def audit_list(limit: int = 200, username: str = "", action: str = ""):
     if not enabled():
         return []
@@ -467,23 +485,48 @@ _TABLES = {
 }
 
 
-def table_rows(name: str, limit: int = 200):
-    """只读查看白名单表。返回 {cols, rows}。"""
+# 各表可按"成员/分组"过滤的列
+_FILTER_OWNER = {"jobs": "owner", "favorites": "owner", "audit": "username", "users": "username"}
+_FILTER_PROJ = {"jobs": "project_id"}
+
+
+def table_rows(name: str, limit: int = 200, owner: str = "", project: str = ""):
+    """白名单表查看（含 id 便于删行）。可按成员/分组过滤。返回 {cols, rows}。"""
     if not enabled() or name not in _TABLES:
         return {"cols": [], "rows": []}
     tbl, cols, order = _TABLES[name]
+    sel = cols if "id" in cols else (["id"] + cols) if tbl != "fav_users" else cols
+    where, args = [], []
+    if owner and name in _FILTER_OWNER:
+        where.append(f"{_FILTER_OWNER[name]}=%s"); args.append(owner)
+    if project and name in _FILTER_PROJ:
+        where.append(f"{_FILTER_PROJ[name]}=%s"); args.append(project)
     try:
+        sql = f"SELECT {', '.join(sel)} FROM {tbl}"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += f" ORDER BY {order} LIMIT %s"; args.append(limit)
         with _conn() as c:
-            rows = c.execute(
-                f"SELECT {', '.join(cols)} FROM {tbl} ORDER BY {order} LIMIT %s", (limit,)
-            ).fetchall()
-        out = []
-        for r in rows:
-            out.append([("" if v is None else str(v)) for v in r])
-        return {"cols": cols, "rows": out}
+            rows = c.execute(sql, tuple(args)).fetchall()
+        out = [[("" if v is None else str(v)) for v in r] for r in rows]
+        return {"cols": sel, "rows": out}
     except Exception as e:
         print(f"[db] table_rows 失败: {e}")
         return {"cols": [], "rows": []}
+
+
+def table_delete_row(name: str, row_id) -> int:
+    """删除白名单表的一行（按 id）。users 表请走用户管理接口。"""
+    real = {"jobs": "jobs", "favorites": "favorites", "audit": "audit_log"}
+    if not enabled() or name not in real:
+        return 0
+    try:
+        with _conn() as c:
+            cur = c.execute(f"DELETE FROM {real[name]} WHERE id=%s", (row_id,))
+            return cur.rowcount
+    except Exception as e:
+        print(f"[db] table_delete_row 失败: {e}")
+        return 0
 
 
 def db_stats():

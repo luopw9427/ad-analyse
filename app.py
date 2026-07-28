@@ -9,7 +9,7 @@
     POST /analyze                触发一次分析
       body: {"project_id":"test","product":"章鱼","pipeline":"merged",
              "pro":false,"overwrite":false,"cross_compare":false}
-    GET  /result?project_id=test 查看某项目在 R2 的分析产物
+    GET  /result?project_id=test 查看某分组在 R2 的分析产物
       可选 ?include_content=false 只列文件不返回内容
     以上带保护的接口需请求头 X-API-Token（设了 APP_TOKEN 才校验）
 
@@ -158,6 +158,14 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+def _epid(owner: str, project: str) -> str:
+    """R2 命名空间：按用户隔离分组，故 R2 里的"分组标识" = 用户~分组名。
+    这样不同用户可建同名分组、互不覆盖；DB 里仍分别存 owner + project(分组名)。"""
+    owner = (owner or "").strip() or "default"
+    project = (project or "").replace("~", "-").replace("/", "-")
+    return f"{owner}~{project}"
+
+
 class AnalyzeReq(BaseModel):
     project_id: str
     product: str
@@ -221,8 +229,9 @@ def health():
 
 def _run_analyze_bg(req: "AnalyzeReq", job_id, owner=""):
     """后台线程跑分析，完成后更新数据库任务状态。"""
+    epid = _epid(owner, req.project_id)   # R2 命名空间（按用户隔离）
     cmd = [sys.executable, str(RUN_FROM_R2),
-           "--project", req.project_id, "--product", req.product]
+           "--project", epid, "--product", req.product]
     if req.pipeline:
         cmd += ["--pipeline", req.pipeline]
     if req.pro:
@@ -235,7 +244,7 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id, owner=""):
         cmd += ["--hypotheses", req.hypotheses]
     if req.batch:
         cmd += ["--batch", req.batch]
-    _prefix = f"projects/{req.project_id}/" + (f"{req.batch}/" if req.batch else "")
+    _prefix = f"projects/{epid}/" + (f"{req.batch}/" if req.batch else "")
 
     t0 = time.time()
     try:
@@ -285,7 +294,8 @@ def _run_analyze_bg(req: "AnalyzeReq", job_id, owner=""):
 
 def _translate_bg(project_id, batch, instr, ds_key, owner=""):
     """后台并发翻译：把批次内生成的中文 JSON 译成英文，逐个上传 <名>.en.json。"""
-    prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
+    epid = _epid(owner, project_id)
+    prefix = f"projects/{epid}/" + (f"{batch}/" if batch else "")
     ref = batch or project_id
     job_id = db.start_job("translate", project_id, ref, batch=batch or "", owner=owner)
     t0 = time.time()
@@ -341,10 +351,11 @@ def _translate_bg(project_id, batch, instr, ds_key, owner=""):
 def analyze(req: AnalyzeReq, user: dict = Depends(current_user)):
     """异步触发分析：立即返回 job_id，后台跑，前端轮询 /jobs 看进度。"""
     # 对象名用该批次的视频名（和拆分一致），而非批次 id
+    epid = _epid(user["username"], req.project_id)
     ref = req.batch or ""
     try:
         if req.batch:
-            pfx = f"projects/{req.project_id}/{req.batch}/"
+            pfx = f"projects/{epid}/{req.batch}/"
             ads = sorted({k[len(pfx):].split("/")[0] for k in r2.list_keys(pfx)
                           if "/" in k[len(pfx):]})
             if ads:
@@ -355,7 +366,7 @@ def analyze(req: AnalyzeReq, user: dict = Depends(current_user)):
     threading.Thread(target=_run_analyze_bg, args=(req, job_id, user["username"]), daemon=True).start()
     return {
         "ok": True, "started": True, "job_id": job_id,
-        "r2_prefix": f"projects/{req.project_id}/" + (f"{req.batch}/" if req.batch else ""),
+        "r2_prefix": f"projects/{epid}/" + (f"{req.batch}/" if req.batch else ""),
         "note": "分析已在后台开始，查任务记录看进度",
     }
 
@@ -533,8 +544,9 @@ def split_batch(project_id: str = Form(...), batch: str = Form(default=""),
         raise HTTPException(status_code=400, detail="没有视频（本地文件或 URL 至少一个）")
     ref = "、".join(it["ad"] for it in items)[:60]
     job_id = db.start_job("split", project_id, ref, engine=engine, batch=batch, owner=user["username"])
+    epid = _epid(user["username"], project_id)   # R2 命名空间；db 里仍存分组名
     threading.Thread(target=_run_split_batch_bg,
-                     args=(project_id, batch, items, str(work), engine, precise, keep_raw, job_id),
+                     args=(epid, batch, items, str(work), engine, precise, keep_raw, job_id),
                      daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id, "batch": batch, "n": len(items)}
 
@@ -557,23 +569,31 @@ def split(project_id: str = Form(...),
     engine = (engine or "cpu").lower()
     batch = batch or time.strftime("%Y%m%d-%H%M%S")
     job_id = db.start_job("split", project_id, ad, engine=engine, batch=batch, owner=user["username"])
+    epid = _epid(user["username"], project_id)
     threading.Thread(target=_run_split_bg,
-                     args=(project_id, batch, ad, str(video_path), str(work), precise,
+                     args=(epid, batch, ad, str(video_path), str(work), precise,
                            job_id, engine, keep_raw),
                      daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id, "ad_id": ad, "engine": engine, "batch": batch}
 
 
 @app.get("/result")
-def result(project_id: str, include_content: bool = True, batch: str = "",
+def result(project_id: str, include_content: bool = True, batch: str = "", owner: str = "",
            user: dict = Depends(current_user)):
-
-    prefix = f"projects/{project_id}/" + (f"{batch}/" if batch else "")
+    # owner 缺省=当前用户；给了别人则查看别人的分组（团队可见）
+    owner = (owner or "").strip() or user["username"]
+    epid = _epid(owner, project_id)
+    real_pfx = f"projects/{epid}/"                   # R2 真实前缀（带用户命名空间）
+    show_pfx = f"projects/{project_id}/"             # 返回给前端时用的前缀（隐去用户）
+    prefix = real_pfx + (f"{batch}/" if batch else "")
     keys = r2.list_keys(prefix)
     if not keys:
-        raise HTTPException(status_code=404, detail=f"{prefix} 下没有任何产物")
+        raise HTTPException(status_code=404, detail=f"该分组下没有任何产物")
 
-    objects = [{"key": k, "url": r2.public_url(k)} for k in keys]
+    def _show(k):   # 把真实 key 的用户命名空间隐去，前端仍按 projects/{分组}/ 解析
+        return show_pfx + k[len(real_pfx):] if k.startswith(real_pfx) else k
+
+    objects = [{"key": _show(k), "url": r2.public_url(k)} for k in keys]
 
     WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json", "source.json",
             "ad_aggregate.en.json", "video_prompt.en.json", "shot_prompts.en.json", "共性镜头prompt.en.json")
@@ -582,12 +602,13 @@ def result(project_id: str, include_content: bool = True, batch: str = "",
         for k in keys:
             if any(k.endswith(w) for w in WANT):
                 try:
-                    reports[k] = r2.read_json(k)
+                    reports[_show(k)] = r2.read_json(k)
                 except Exception as e:
-                    reports[k] = {"_error": str(e)}
+                    reports[_show(k)] = {"_error": str(e)}
 
     return {
         "project_id": project_id,
+        "owner": owner,
         "count": len(keys),
         "objects": objects,
         "reports": reports,
@@ -604,27 +625,27 @@ class DeleteReq(BaseModel):
     ad_id: Optional[str] = None        # 指定则只删该广告
     batch: Optional[str] = None        # 指定批次；配合 ad_id 删批次内单条，单独给删整批
     analysis_only: bool = False        # 只删分析产物，保留切片
-    clear_jobs: bool = False           # 同时清理该项目的任务记录
+    clear_jobs: bool = False           # 同时清理该分组的任务记录
+    owner: Optional[str] = None        # 归属用户；缺省=当前用户（删别人的需管理员）
 
 
 @app.post("/delete")
 def delete(req: DeleteReq, request: Request, user: dict = Depends(current_user)):
-    """删除 R2 上的产物，释放存储。权限：管理员随意；普通用户仅限自己创建的批次；整项目删除仅管理员。"""
-    db.audit(user["username"], _client_ip(request), "r2_delete",
-             f"项目={req.project_id} 批次={req.batch or '-'} 广告={req.ad_id or '-'}{' 仅分析' if req.analysis_only else ''}")
+    """删除 R2 上的产物，释放存储。权限：管理员随意；普通用户仅限自己的分组；删整个分组仅管理员。"""
     if not req.project_id:
         raise HTTPException(status_code=400, detail="缺少 project_id")
 
     is_admin = user["role"] == "admin"
-    if not is_admin:
-        if req.batch:
-            bo = db.batch_owner(req.project_id, req.batch)
-            if bo and bo != user["username"]:
-                raise HTTPException(status_code=403, detail="只能删除自己创建的批次")
-        else:
-            raise HTTPException(status_code=403, detail="删除整个项目需要管理员权限")
+    target_owner = (req.owner or "").strip() or user["username"]
+    # 分组已按用户隔离：本人可删自己分组（含整组）；删别人的需管理员
+    if not is_admin and target_owner != user["username"]:
+        raise HTTPException(status_code=403, detail="只能删除自己的分组")
 
-    pid = req.project_id
+    db.audit(user["username"], _client_ip(request), "r2_delete",
+             f"归属={target_owner} 分组={req.project_id} 批次={req.batch or '-'} 广告={req.ad_id or '-'}{' 仅分析' if req.analysis_only else ''}")
+
+    pid = _epid(target_owner, req.project_id)      # R2 命名空间
+    rawpid = pid
     bseg = f"{req.batch}/" if req.batch else ""   # 批次层
     if req.analysis_only:
         # 只删分析产物：analysis_output/ + 共性/横向（限定批次/广告）
@@ -647,12 +668,12 @@ def delete(req: DeleteReq, request: Request, user: dict = Depends(current_user))
         deleted += r2.delete_prefix(f"raw/{pid}/{req.batch}/")
         scope = f"批次 {req.batch}（projects/ + raw/）"
     else:
-        # 删整个项目：projects/ 与 raw/ 全清，绝不留残留
+        # 删整个分组：projects/ 与 raw/ 全清，绝不留残留
         deleted = r2.delete_prefix(f"projects/{pid}/")
         deleted += r2.delete_prefix(f"raw/{pid}/")
         scope = f"projects/{pid}/ + raw/{pid}/"
 
-    jobs_deleted = db.delete_jobs(req.project_id, req.batch or "") if req.clear_jobs else 0
+    jobs_deleted = db.delete_jobs(req.project_id, req.batch or "", target_owner) if req.clear_jobs else 0
     return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}
 
 
@@ -661,15 +682,17 @@ class JobDeleteReq(BaseModel):
 
 
 @app.get("/download")
-def download(project_id: str, ad_id: str = "", batch: str = "", user: dict = Depends(current_user)):
+def download(project_id: str, ad_id: str = "", batch: str = "", owner: str = "", user: dict = Depends(current_user)):
     """打包某广告的全部产物为 zip：切片、shots.json、卖点(ad_aggregate)、
-    脚本/镜头 prompt、项目级共性 prompt、以及首图(shot_000 第一帧)。"""
+    脚本/镜头 prompt、分组级共性 prompt、以及首图(shot_000 第一帧)。"""
     import r2_storage as r2
+    owner = (owner or "").strip() or user["username"]
+    epid = _epid(owner, project_id)
     if ad_id:
-        prefix = f"projects/{project_id}/{batch}/{ad_id}/" if batch else f"projects/{project_id}/{ad_id}/"
+        prefix = f"projects/{epid}/{batch}/{ad_id}/" if batch else f"projects/{epid}/{ad_id}/"
         dl_name = f"{project_id}_{batch+'_' if batch else ''}{ad_id}"
     else:                       # 整批打包
-        prefix = f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/"
+        prefix = f"projects/{epid}/{batch}/" if batch else f"projects/{epid}/"
         dl_name = f"{project_id}_{batch or 'all'}"
     keys = r2.list_keys(prefix)
     if not keys:
@@ -711,7 +734,7 @@ def download(project_id: str, ad_id: str = "", batch: str = "", user: dict = Dep
         # 共性 prompt 若单条广告下载则补带上（整批下载时已在 keys 里）
         if ad_id:
             folder = "_".join([p for p in [label, ad_id] if p]) or project_id
-            cbase = (f"projects/{project_id}/{batch}/" if batch else f"projects/{project_id}/")
+            cbase = (f"projects/{epid}/{batch}/" if batch else f"projects/{epid}/")
             for cname in ("共性镜头prompt.json", "共性镜头prompt.en.json"):
                 try:
                     dst = tmp / cname
@@ -810,12 +833,18 @@ def auth_login(req: LoginReq, request: Request):
         db.audit(req.username.strip(), ip, "login_fail", "用户名或密码错误")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = make_token(u["username"], u["role"], u["pin_ver"], req.remember)
-    db.audit(u["username"], ip, "login", "记住登录" if req.remember else "本次会话")
+    first = not db.audit_has_login(u["username"])
+    db.audit(u["username"], ip, "login_first" if first else "login",
+             ("首次登录 · " if first else "") + ("记住登录" if req.remember else "本次会话"))
     return {"ok": True, "token": token, "username": u["username"], "role": u["role"]}
 
 
 @app.get("/auth/me")
-def auth_me(user: dict = Depends(current_user)):
+def auth_me(request: Request, login: int = 0, user: dict = Depends(current_user)):
+    # login=1：来自主页打开时的自动登录（记住 token），也算一次成功登录
+    if login:
+        first = not db.audit_has_login(user["username"])
+        db.audit(user["username"], _client_ip(request), "login_first" if first else "login", "自动登录（打开网页）")
     return {"username": user["username"], "role": user["role"]}
 
 
@@ -918,8 +947,21 @@ def admin_audit(limit: int = 200, username: str = "", action: str = "", admin: d
 
 
 @app.get("/admin/table")
-def admin_table(name: str, limit: int = 200, admin: dict = Depends(require_admin)):
-    return db.table_rows(name, limit)
+def admin_table(name: str, limit: int = 200, owner: str = "", project: str = "", admin: dict = Depends(require_admin)):
+    return db.table_rows(name, limit, owner, project)
+
+
+class RowDelReq(BaseModel):
+    name: str
+    id: int
+
+
+@app.post("/admin/table/delete")
+def admin_table_delete(req: RowDelReq, request: Request, admin: dict = Depends(require_admin)):
+    n = db.table_delete_row(req.name, req.id)
+    if n:
+        db.audit(admin["username"], _client_ip(request), "db_delete", f"{req.name}#{req.id}")
+    return {"ok": True, "deleted": n}
 
 
 @app.get("/admin/stats")
@@ -937,6 +979,7 @@ class ReviseReq(BaseModel):
     selling: Optional[List[str]] = None  # 直接修改的新卖点（shot/common）
     instruction: Optional[str] = ""    # 修改需求（间接）
     product: Optional[str] = ""
+    owner: Optional[str] = None          # 归属用户；缺省=当前用户
     openrouter_key: Optional[str] = None
     deepseek_key: Optional[str] = None
     custom_prompts: Optional[dict] = None
@@ -949,10 +992,11 @@ def _find_key(prefix: str, suffix: str) -> Optional[str]:
     return None
 
 
-def _run_revise_bg(req: "ReviseReq", job_id):
+def _run_revise_bg(req: "ReviseReq", job_id, owner=""):
     t0 = time.time()
     try:
-        pid, batch, ad, ptype, idx = req.project_id, req.batch or "", req.ad or "", req.ptype, req.idx
+        pid = _epid(owner, req.project_id)     # R2 命名空间
+        batch, ad, ptype, idx = req.batch or "", req.ad or "", req.ptype, req.idx
         or_key = req.openrouter_key or os.environ.get("OPENROUTER_API_KEY", "")
         ds_key = req.deepseek_key or DEEPSEEK_API_KEY
 
@@ -1053,6 +1097,9 @@ def prompt_revise(req: ReviseReq, user: dict = Depends(current_user)):
     if req.ptype not in ("shot", "common", "video"):
         raise HTTPException(status_code=400, detail="ptype 必须为 shot/common/video")
     ref = f"{req.ad or '共性'}" + (f"#{req.idx}" if req.idx is not None else "")
+    target_owner = (req.owner or "").strip() or user["username"]
+    if target_owner != user["username"] and user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="只能修改自己分组的提示词")
     job_id = db.start_job("prompt_edit", req.project_id, ref, batch=req.batch or "", owner=user["username"])
-    threading.Thread(target=_run_revise_bg, args=(req, job_id), daemon=True).start()
+    threading.Thread(target=_run_revise_bg, args=(req, job_id, target_owner), daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id}

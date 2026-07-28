@@ -60,9 +60,9 @@ async function api(p,opt){opt=opt||{};opt.headers=Object.assign({'Authorization'
   const r=await fetch(p,opt);if(r.status===401){location.href='/';throw new Error('401')}
   if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.detail||('HTTP '+r.status))}return r.json()}
 let ME=null,TAB='users';
-const ACT={login:['登录','ok'],login_fail:['登录失败','warn'],user_create:['建号',''],user_role:['改角色',''],
+const ACT={login:['登录','ok'],login_first:['首次登录','ok'],login_fail:['登录失败','warn'],user_create:['建号',''],user_role:['改角色',''],
   user_reset_pin:['重置密码',''],user_disable:['禁用/启用',''],user_delete:['删用户','warn'],
-  r2_delete:['删R2数据','warn'],job_delete:['删任务','warn']};
+  r2_delete:['删R2数据','warn'],job_delete:['删任务','warn'],db_delete:['删数据行','warn']};
 const TBL={users:'用户',jobs:'任务',favorites:'收藏',audit:'日志'};
 
 async function boot(){
@@ -79,7 +79,7 @@ async function render(){
   const tabsHtml='<div class="tabs">'
     +'<button class="'+(TAB==='users'?'on':'')+'" onclick="go(\'users\')">用户管理</button>'
     +'<button class="'+(TAB==='audit'?'on':'')+'" onclick="go(\'audit\')">登录 / 操作日志</button>'
-    +'<button class="'+(TAB==='db'?'on':'')+'" onclick="go(\'db\')">数据库查看</button></div>';
+    +'<button class="'+(TAB==='db'?'on':'')+'" onclick="go(\'db\')">数据库管理</button></div>';
   $('#wrap').innerHTML=statHtml+tabsHtml+'<div class="card" id="tabbody"><div class="muted">加载中…</div></div>';
   if(TAB==='users')renderUsers();
   else if(TAB==='audit')renderAudit();
@@ -130,21 +130,34 @@ async function renderAudit(){
   }catch(e){box.innerHTML=h+'<div class="muted">加载失败：'+e.message+'</div>'}
 }
 
-// 数据库查看
-let DBT='jobs';
+// 数据库管理（按成员 / 分组 查看，可删行）
+let DBT='jobs',DBOWNER='',DBPROJ='';
 async function renderDb(){
   const box=$('#tabbody');
   let sub='<div class="tabs">'+Object.keys(TBL).map(k=>
     '<button class="'+(DBT===k?'on':'')+'" onclick="setDbt(\''+k+'\')">'+TBL[k]+' 表</button>').join('')+'</div>';
-  box.innerHTML='<h3>数据库查看（只读）</h3>'+sub+'<div id="dbbody"><div class="muted">加载中…</div></div>';
-  try{const d=await api('/admin/table?name='+DBT+'&limit=300');
-    let h='<div class="scroll"><table><thead><tr>'+(d.cols||[]).map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
-    (d.rows||[]).forEach(r=>{h+='<tr>'+r.map(v=>'<td class="muted">'+((v||'')+'').slice(0,120).replace(/</g,'&lt;')+'</td>').join('')+'</tr>';});
-    h+='</tbody></table></div><div class="muted" style="margin-top:8px;font-size:11.5px">最多显示 300 行。</div>';
+  const canProj=(DBT==='jobs');
+  let filt='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">'
+    +'<input id="f_owner" placeholder="按成员(用户名)筛选" size="14" value="'+DBOWNER.replace(/"/g,'')+'">'
+    +(canProj?'<input id="f_proj" placeholder="按分组筛选" size="12" value="'+DBPROJ.replace(/"/g,'')+'">':'')
+    +'<button class="mini" onclick="applyDbFilter()">筛选</button>'
+    +'<button class="mini" onclick="clearDbFilter()">清空</button></div>';
+  box.innerHTML='<h3>数据库管理</h3>'+sub+filt+'<div id="dbbody"><div class="muted">加载中…</div></div>';
+  const canDel=(DBT!=='users');
+  try{const d=await api('/admin/table?name='+DBT+'&limit=400&owner='+encodeURIComponent(DBOWNER)+'&project='+encodeURIComponent(DBPROJ));
+    let h='<div class="scroll"><table><thead><tr>'+(d.cols||[]).map(c=>'<th>'+c+'</th>').join('')+(canDel?'<th>操作</th>':'')+'</tr></thead><tbody>';
+    (d.rows||[]).forEach(r=>{const id=(d.cols[0]==='id')?r[0]:'';
+      h+='<tr>'+r.map(v=>'<td class="muted">'+((v||'')+'').slice(0,120).replace(/</g,'&lt;')+'</td>').join('')
+       +(canDel&&id!==''?('<td><button class="mini del" onclick="delRow(\''+DBT+'\','+id+')">删除</button></td>'):(canDel?'<td></td>':''))+'</tr>';});
+    h+='</tbody></table></div><div class="muted" style="margin-top:8px;font-size:11.5px">最多显示 400 行。users 表请在「用户管理」里操作。</div>';
     $('#dbbody').innerHTML=h;
   }catch(e){$('#dbbody').innerHTML='<div class="muted">加载失败：'+e.message+'</div>'}
 }
-function setDbt(t){DBT=t;renderDb()}
+function setDbt(t){DBT=t;DBOWNER='';DBPROJ='';renderDb()}
+function applyDbFilter(){DBOWNER=($('#f_owner')?$('#f_owner').value.trim():'');DBPROJ=($('#f_proj')?$('#f_proj').value.trim():'');renderDb()}
+function clearDbFilter(){DBOWNER='';DBPROJ='';renderDb()}
+async function delRow(name,id){if(!confirm('删除 '+name+' 表第 '+id+' 行？不可恢复。'))return;
+  if(await _post('/admin/table/delete',{name,id}))renderDb()}
 boot();
 </script>
 </body>

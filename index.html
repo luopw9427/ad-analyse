@@ -235,9 +235,9 @@
   <input id="dskey" placeholder="留空=用服务端密钥" type="password" size="16"
          title="翻译（中→英）用的 DeepSeek 密钥。留空即用服务端(Railway 变量)里的 DEEPSEEK_API_KEY。填了只存本地浏览器，不上传保存">
   <button class="eye" onclick="toggleEye('dskey',this)" title="显示/隐藏">👁</button>
-  <span class="muted">项目名</span>
+  <span class="muted">分组名</span>
   <input id="project" placeholder="如 test" size="10"
-         title="一批广告用同一个项目名。R2 里按 projects/{项目名}/{广告}/ 存放，分析和横向对比也按项目为单位">
+         title="一批广告用同一个分组名。R2 里按 projects/{分组名}/{广告}/ 存放，分析和横向对比也按分组为单位">
   <button onclick="loadAll()">加载结果</button>
   <span id="status" class="muted"></span>
   <span id="userbox" style="margin-left:auto;display:flex;gap:12px;align-items:center">
@@ -297,14 +297,11 @@
   <div class="card">
     <h2>存储管理 <span class="muted" style="font-weight:400;font-size:12px">· 删除后不可恢复</span></h2>
     <div class="row">
-      <button class="ghost" onclick="doDelete(false,true)">仅删分析产物（保留切片）</button>
-      <button class="ghost" onclick="doDelete(false,false)">删除整个项目（含切片）</button>
-      <button class="ghost" onclick="clearJobs()">清空本项目任务记录</button>
-    </div>
-    <div class="row">
-      <span class="muted">删除批次：</span>
-      <input id="delBatch" placeholder="批次 id，如 20260722-153012" size="20">
-      <button class="ghost" onclick="doDeleteBatch()">删除该批次</button>
+      <button class="ghost" onclick="doDelete(false,true)">删除分析产物（保留切片）</button>
+      <button class="ghost" onclick="doDelete(false,false)">删除本分组所有文件</button>
+      <button class="ghost" onclick="clearJobs()">清除本分组任务记录</button>
+      <input id="delBatch" placeholder="任务 id，如 20260722-钻石画-001" size="22">
+      <button class="ghost" onclick="doDeleteBatch()">删除任务</button>
     </div>
   </div>
 
@@ -377,7 +374,7 @@ async function afterLogin(){try{await loadAll()}catch(e){}}
 async function bootAuth(){
   _token=_loadToken();
   if(!_token){showLogin();return}
-  try{const r=await fetch('/auth/me',{headers:headers()});if(!r.ok)throw 0;
+  try{const r=await fetch('/auth/me?login=1',{headers:headers()});if(!r.ok)throw 0;
     const d=await r.json();applyUser(d.username,d.role);hideLogin();afterLogin();
   }catch(e){_clearToken();showLogin()}
 }
@@ -411,7 +408,7 @@ async function openPersonal(){
   h+='<div class="fav-kind-h">我的收藏（'+favs.length+'）</div>';
   h+=favs.length?('<div style="max-height:150px;overflow:auto">'+favs.slice(0,60).map(f=>'<div class="muted" style="font-size:12.5px;padding:2px 0">['+(kmap[f.kind]||f.kind)+'] '+(f.label||f.ref)+'</div>').join('')+'</div>'):'<div class="muted">暂无</div>';
   h+='<div class="fav-kind-h">我的配置</div><div class="muted" style="font-size:12.5px;line-height:1.7">'
-    +'当前项目：'+(proj()||'-')+'<br>OpenRouter Key：'+($('#orkey').value?'已自填（本机）':'用服务端')
+    +'当前分组：'+(proj()||'-')+'<br>OpenRouter Key：'+($('#orkey').value?'已自填（本机）':'用服务端')
     +'<br>DeepSeek Key：'+($('#dskey').value?'已自填（本机）':'用服务端')+'</div>';
   box.innerHTML=h;
 }
@@ -516,7 +513,7 @@ async function doAnalyze(){
   remember();if(!tok()){alert('先填访问密码');return}
   $('#btnAnalyze').disabled=true;
   const batch=_curBatch||localStorage.getItem('curBatch')||'';
-  if(!batch){ if(!confirm('本次没有先上传拆分，未指定批次。\n确定分析整个项目（会把项目内所有批次一起归纳共性）？'))return; }
+  if(!batch){ if(!confirm('本次没有先上传拆分，未指定批次。\n确定分析整个分组（会把分组内所有批次一起归纳共性）？'))return; }
   const body={project_id:proj(),product:$('#product').value.trim()||'产品',
     cross_compare:$('#cc').checked,pro:$('#pro').checked,overwrite:$('#ow').checked,
     hypotheses:$('#hyp').value.trim()||null,
@@ -524,7 +521,7 @@ async function doAnalyze(){
     deepseek_key:$('#dskey').value.trim()||null,
     batch:batch||null,
     custom_prompts:(()=>{try{const o=JSON.parse(localStorage.getItem('customPrompts')||'{}');return Object.keys(o).length?o:null}catch(e){return null}})()};
-  setStatus('提交分析…');logOps('▶ 提交分析 '+(batch?('批次 '+batch):('整个项目 '+proj()))+' …');
+  setStatus('提交分析…');logOps('▶ 提交分析 '+(batch?('批次 '+batch):('整个分组 '+proj()))+' …');
   let jid=null;
   try{
     const r=await fetch('/analyze',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -671,9 +668,12 @@ async function setDrawerMode(mode){
   _drawerMode=mode;renderDrawer();updEdgeTabs();
 }
 
-async function viewJob(kind,ref,batch,detail,status){
+async function viewJob(kind,ref,batch,detail,status,owner,project){
   if(status==='error'&&detail){logOps('✗ 任务失败原因：'+detail);return}
-  await ensureResult();
+  // 切到该任务归属的 (创建人, 分组)，强制重新加载其结果
+  const no=owner||_user,np=project||proj();
+  if(no!==_ctxOwner||np!==_ctxProject){_ctxOwner=no;_ctxProject=np;_res=null;}
+  await ensureResult(true);
   if(!_res)return;
   await loadFavs();        // 刷新收藏态
   _drawerMode='all';
@@ -692,15 +692,15 @@ function focusBatch(batch){
     setTimeout(()=>{card.style.outline='';card.style.outlineOffset='';},1800);},80);
 }
 
-async function delJob(id,kind,ref,batch){
-  if(!tok()){alert('先填访问密码');return}
+async function delJob(id,kind,ref,batch,owner,project){
+  const pj=project||proj(),ow=owner||_user;
   let msg,delReq=null;
   if(kind==='split'&&ref){
     msg='删除任务 #'+id+'（拆分 '+ref+'）\n\n将删除该广告在 R2 的全部文件（切片+分析产物+原视频），不可恢复。确定？';
-    delReq={project_id:proj(),batch:batch||null,ad_id:ref,analysis_only:false,clear_jobs:false};
+    delReq={project_id:pj,owner:ow,batch:batch||null,ad_id:ref,analysis_only:false,clear_jobs:false};
   }else if(kind==='analyze'){
     msg='删除任务 #'+id+'（分析批次 '+(batch||ref)+'）\n\n将删除该批次在 R2 的全部文件（所有广告切片+分析产物+共性+原视频）及该批次任务记录，不可恢复。确定？';
-    delReq={project_id:proj(),batch:(batch||ref)||null,ad_id:null,analysis_only:false,clear_jobs:true};
+    delReq={project_id:pj,owner:ow,batch:(batch||ref)||null,ad_id:null,analysis_only:false,clear_jobs:true};
   }else{
     msg='删除任务记录 #'+id+'？';
   }
@@ -723,7 +723,7 @@ async function doDelete(single,analysisOnly){
   remember();if(!tok()){alert('先填访问密码');return}
   const ad=single?$('#delAd').value.trim():'';
   if(single&&!ad){alert('先填要删除的广告名');return}
-  const what=analysisOnly?'分析产物':(single?('广告 '+ad+' 的全部文件'):('整个项目 '+proj()+' 的全部文件'));
+  const what=analysisOnly?'分析产物':(single?('广告 '+ad+' 的全部文件'):('整个分组 '+proj()+' 的全部文件'));
   if(!confirm('确定删除 '+what+' ？此操作不可恢复。'))return;
   try{
     const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
@@ -746,7 +746,7 @@ async function doDeleteBatch(){
   }catch(e){logOps('✗ 删除失败 '+e.message)}
 }
 async function clearJobs(){
-  if(!confirm('清空项目 '+proj()+' 的任务记录？'))return;
+  if(!confirm('清空分组 '+proj()+' 的任务记录？'))return;
   try{
     const r=await fetch('/delete',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
       body:JSON.stringify({project_id:proj(),analysis_only:true,ad_id:'__none__',clear_jobs:true})});
@@ -775,14 +775,14 @@ async function loadJobs(){
   try{const d=await api('/jobs?limit=30');
     if(!d.db_enabled){$('#jobs').innerHTML='<span class="muted">数据库未启用</span>';return}
     if(!d.jobs.length){$('#jobs').innerHTML='<span class="muted">暂无记录</span>';return}
-    let h='<table><tr><th>ID</th><th>类型</th><th>项目</th><th>对象</th><th>批次</th><th>产品名</th><th>创建人</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
+    let h='<table><tr><th>ID</th><th>类型</th><th>分组</th><th>对象</th><th>批次</th><th>产品名</th><th>创建人</th><th>引擎</th><th>状态</th><th>耗时(s)</th><th>费用</th><th>时间</th><th>操作</th></tr>';
     const splitRef={};d.jobs.forEach(j=>{if(j.kind==='split'&&j.batch&&j.ref)splitRef[j.batch]=j.ref});
     d.jobs.slice(0,_jobLimit).forEach(j=>{const objName=(j.kind==='analyze'&&splitRef[j.batch])?splitRef[j.batch]:(j.ref||'');const cls=j.status==='done'?'done':(j.status==='error'?'error':'run');
       const fref='task|'+j.project_id+'|'+(j.batch||j.ref||'');
       const fmeta={project:j.project_id,batch:(j.batch||''),jobKind:j.kind,label:objName};
       const fon=_favSet.has(fref)?' on':'';const fstar=_favSet.has(fref)?'★':'☆';
       const slot=`<button class="fav-star${fon}" type="button" data-ref="${fref.replace(/"/g,'&quot;')}" data-kind="task" data-label="${(objName||'').replace(/"/g,'&quot;')}" data-meta='${JSON.stringify(fmeta).replace(/'/g,"&#39;")}' title="收藏/取消收藏">${fstar}</button>`;
-      h+=`<tr><td>${j.id}</td><td>${kindLabel(j.kind)}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.owner||'—'}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}')">删除</button></td></tr>`});
+      h+=`<tr><td>${j.id}</td><td>${kindLabel(j.kind)}</td><td>${j.project_id}</td><td><span class="objw" title="${(objName).replace(/"/g,'')}"><span class="obj">${objName}</span></span></td><td class="muted">${j.batch||''}</td><td class="muted">${j.product||''}</td><td class="muted">${j.owner||'—'}</td><td class="muted">${j.engine||''}</td><td><span class="badge ${cls}" title="${(j.detail||'').replace(/"/g,"'")}">${j.status}</span></td><td>${j.duration_sec||''}</td><td class="muted">${fmtCost(j)}</td><td class="muted">${(j.created_at||'').slice(0,19)}</td><td class="ops">${slot}<button class="mini" onclick="viewJob('${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.detail||'').replace(/'/g,"").replace(/"/g,"")}','${j.status}','${(j.owner||'').replace(/'/g,"")}','${(j.project_id||'').replace(/'/g,"\\'")}')">查看</button><button class="mini del" onclick="delJob(${j.id},'${(j.kind||'')}','${(j.ref||'').replace(/'/g,"\\'")}','${(j.batch||'')}','${(j.owner||'').replace(/'/g,"")}','${(j.project_id||'').replace(/'/g,"\\'")}')">删除</button></td></tr>`});
     const total=d.jobs.reduce((a,j)=>a+Number(j.cost_usd||0),0);
     const nAn=d.jobs.filter(j=>j.kind==='analyze').length, nSp=d.jobs.filter(j=>j.kind==='split').length;
     const moreBtn=(d.jobs.length>_jobLimit)
@@ -810,8 +810,12 @@ function wireFavStars(){
 
 function adFromKey(k,pid){const rest=k.replace('projects/'+pid+'/','');const p=rest.split('/');return p.length>=2?p[0]:null}
 
+// 当前正在查看的结果归属：owner=创建人，project=分组名（默认=自己 + 当前分组名）
+let _ctxOwner='',_ctxProject='';
+function resQuery(){return 'project_id='+encodeURIComponent(_ctxProject||proj())+'&owner='+encodeURIComponent(_ctxOwner||_user);}
 async function loadAll(){
-  remember();setStatus('加载中…');await loadFavs();await loadJobs();
+  remember();setStatus('加载中…');_ctxOwner=_user;_ctxProject=proj();
+  await loadFavs();await loadJobs();
   await loadResultsProgressive();   // 逐批次渐进显示，不必等全部加载
 }
 
@@ -826,7 +830,7 @@ function parseKey(k,pid){
 }
 // 把一次 /result 响应合并进 _res.batches（可多次调用做增量填充）
 function _mergeResult(data){
-  const pid=proj();
+  const pid=_ctxProject||proj();
   if(!_res)_res={batches:{},count:0};
   const batches=_res.batches;
   const B=b=>batches[b]||(batches[b]={ads:{},vids:{},common:null});
@@ -849,9 +853,9 @@ function _mergeResult(data){
 }
 async function ensureResult(force){
   if(_res&&!force)return _res;
-  let data;try{data=await api('/result?project_id='+encodeURIComponent(proj()))}
+  let data;try{data=await api('/result?'+resQuery())}
   catch(e){_res=null;
-    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该项目不存在或暂无产物</div>';renderDrawer();}
+    if((''+e.message).includes('404')){setStatus('该分组不存在或暂无产物');$('#results').innerHTML='<div class="muted" style="padding:6px">该分组不存在或暂无产物</div>';renderDrawer();}
     else setStatus('加载失败：'+e.message);
     return null;}
   _res={batches:{},count:data.count};_mergeResult(data);
@@ -862,16 +866,16 @@ async function ensureResult(force){
 async function loadResultsProgressive(){
   _res=null;
   let list;
-  try{list=await api('/result?include_content=false&project_id='+encodeURIComponent(proj()))}
+  try{list=await api('/result?include_content=false&'+resQuery())}
   catch(e){
-    if((''+e.message).includes('404')){setStatus('该项目不存在或暂无产物');_res=null;_drawerMode='all';renderDrawer();return;}
+    if((''+e.message).includes('404')){setStatus('该分组暂无产物');_res=null;_drawerMode='all';renderDrawer();return;}
     setStatus('加载失败：'+e.message);return;}
   _res={batches:{},count:list.count};_mergeResult(list);
   _drawerMode='all';renderDrawer();               // 立即显示批次骨架+切片
   const bs=Object.keys(_res.batches).sort().reverse();  // 新批次先出
   let done=0;
   for(const b of bs){
-    try{const bd=await api('/result?project_id='+encodeURIComponent(proj())+'&batch='+encodeURIComponent(b));
+    try{const bd=await api('/result?'+resQuery()+'&batch='+encodeURIComponent(b));
       _mergeResult(bd);}catch(e){}
     done++;setStatus('已加载 '+done+'/'+bs.length+' 批次…');renderDrawer();
   }
@@ -894,7 +898,7 @@ function renderDrawer(){
     +'<button class="mini" onclick="drawerAll(false)">全部收起</button></div></div>';
   if(!_res){dr.innerHTML+='<div class="muted">点顶部「加载结果」加载</div>';return}
   const bs=Object.keys(_res.batches).sort().reverse();  // 新批次在上
-  if(!bs.length){dr.innerHTML+='<div class="muted">该项目暂无批次</div>';return}
+  if(!bs.length){dr.innerHTML+='<div class="muted">该分组暂无批次</div>';return}
   bs.forEach(b=>dr.appendChild(drawerBatch(b)));
 }
 // 收藏视图：个人=只看自己的，团队=所有人的；再按类型分组
@@ -920,10 +924,10 @@ function favRow(f){
   const t=document.createElement('div');t.style.cssText='font-weight:600;margin-bottom:6px;padding-right:56px;word-break:break-all';
   if(f.kind==='task'){
     t.textContent='['+(m.jobKind||'任务')+'] '+(f.label||m.batch||'');row.appendChild(t);
-    const sub=document.createElement('div');sub.className='muted';sub.style.fontSize='12px';sub.textContent='批次 '+(m.batch||'-')+' · 项目 '+(m.project||'-');row.appendChild(sub);
+    const sub=document.createElement('div');sub.className='muted';sub.style.fontSize='12px';sub.textContent='批次 '+(m.batch||'-')+' · 分组 '+(m.project||'-')+(m.owner?(' · @'+m.owner):'');row.appendChild(sub);
     const btn=document.createElement('button');btn.className='mini';btn.textContent='展开该批次';btn.style.marginTop='8px';
     const holder=document.createElement('div');holder.style.marginTop='10px';
-    btn.onclick=()=>toggleFavTask(m.project,m.batch,holder,btn);
+    btn.onclick=()=>toggleFavTask(m.owner||f.owner,m.project,m.batch,holder,btn);
     row.appendChild(btn);row.appendChild(holder);
   }else if(f.kind==='clip'){
     t.textContent=f.label||m.name||'切片';row.appendChild(t);
@@ -941,10 +945,11 @@ function favRow(f){
   return row;
 }
 // 在收藏栏里就地展开/收起该任务批次的完整内容（不跳转到全部结果）
-async function toggleFavTask(project,batch,holder,btn){
+async function toggleFavTask(owner,project,batch,holder,btn){
   if(holder.firstChild){holder.innerHTML='';btn.textContent='展开该批次';return;}
   btn.textContent='加载中…';
-  if(project&&project!==proj()){$('#project').value=project;_res=null;}
+  const no=owner||_user,np=project||proj();
+  if(no!==_ctxOwner||np!==_ctxProject){_ctxOwner=no;_ctxProject=np;_res=null;}
   if(!_res||!_res.batches||!_res.batches[batch])await ensureResult(true);
   if(!_res||!_res.batches||!_res.batches[batch]){
     holder.innerHTML='<div class="muted" style="padding:6px">该批次已删除或不存在</div>';btn.textContent='收起';return;}
@@ -956,11 +961,13 @@ function drawerBatch(batch,openTop){
   const dlb=document.createElement('button');dlb.className='mini dlbtn';dlb.title='下载整批';dlb.innerHTML=IC.dl;dlb.dataset.ic=IC.dl;
   dlb.style.cssText='position:absolute;top:14px;right:16px;z-index:1';dlb.onclick=async()=>{await downloadBatch(batch);markDone(dlb);};c.appendChild(dlb);
   const det=document.createElement('details');det.open=!!openTop;det.id='dbatch-'+batch;
+  const _o=_ctxOwner||_user,_p=_ctxProject||proj();
   const sm=document.createElement('summary');sm.className='ad-sum';
-  sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')+'</span>';
+  sm.innerHTML='<b>批次 '+batch+'</b> <span class="muted" style="font-weight:400">· '+nAds+' 广告'+(bo.common?' · 含共性镜头':'')
+    +' <span class="rolechip user" style="margin-left:4px">@'+_o+' · '+_p+'</span></span>';
   const adNames=Object.keys(bo.ads).join('、');
-  sm.appendChild(favStar('task','task|'+proj()+'|'+batch,adNames||('批次 '+batch),
-    {project:proj(),batch:batch,jobKind:'batch',label:adNames||('批次 '+batch)}));
+  sm.appendChild(favStar('task','task|'+_o+'|'+_p+'|'+batch,adNames||('批次 '+batch),
+    {owner:_o,project:_p,batch:batch,jobKind:'batch',label:adNames||('批次 '+batch)}));
   det.appendChild(sm);
   Object.keys(bo.ads).forEach(ad=>det.appendChild(adBlock(batch,ad)));
   if(bo.common)det.appendChild(renderCommon(bo.common,batch));
@@ -1067,11 +1074,11 @@ async function downloadBatch(batch){
   if(!tok()){alert('先填访问密码');return}
   setStatus('打包整批 '+batch+' …');logOps('▶ 打包整批 '+batch+' …');
   try{
-    const q='/download?project_id='+encodeURIComponent(proj())+'&batch='+encodeURIComponent(batch);
+    const q='/download?'+resQuery()+'&batch='+encodeURIComponent(batch);
     const r=await fetch(q,{headers:headers()});
     if(!r.ok){logOps('✗ 下载失败 '+r.status);setStatus('下载失败');return}
     const blob=await r.blob();const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=proj()+'_'+batch+'.zip';
+    const a=document.createElement('a');a.href=url;a.download=(_ctxProject||proj())+'_'+batch+'.zip';
     document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
     logOps('✓ 已下载整批 '+batch+'.zip');setStatus('');
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
@@ -1080,11 +1087,11 @@ async function downloadAd(batch,ad){
   if(!tok()){alert('先填访问密码');return}
   setStatus('打包下载 '+ad+' …');logOps('▶ 打包下载 '+ad+' …');
   try{
-    const q='/download?project_id='+encodeURIComponent(proj())+'&ad_id='+encodeURIComponent(ad)+(batch?('&batch='+encodeURIComponent(batch)):'');
+    const q='/download?'+resQuery()+'&ad_id='+encodeURIComponent(ad)+(batch?('&batch='+encodeURIComponent(batch)):'');
     const r=await fetch(q,{headers:headers()});
     if(!r.ok){logOps('✗ 下载失败 '+r.status);setStatus('下载失败');return}
     const blob=await r.blob();const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=proj()+'_'+(batch?batch+'_':'')+ad+'.zip';
+    const a=document.createElement('a');a.href=url;a.download=(_ctxProject||proj())+'_'+(batch?batch+'_':'')+ad+'.zip';
     document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
     logOps('✓ 已下载 '+ad+'.zip');setStatus('');
   }catch(e){logOps('✗ 下载失败 '+e.message);setStatus('下载失败')}
@@ -1095,8 +1102,8 @@ function promptItem(it,ctx){
   const d=document.createElement('details');d.open=true;d.className='pi';
   const sm=document.createElement('summary');sm.textContent=(it.标题||it.id||'镜头');
   if(ctx){const title=it.标题||('镜头'+((ctx.idx||0)+1));
-    const ref='prompt|'+ctx.project+'|'+ctx.batch+'|'+(ctx.ad||'common')+'|'+ctx.ptype+'|'+ctx.lang+'|'+(ctx.idx||0);
-    const meta={project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:ctx.ptype,lang:ctx.lang,title:title,text:it.prompt||'',卖点:it.卖点||[]};
+    const ref='prompt|'+(ctx.owner||'')+'|'+ctx.project+'|'+ctx.batch+'|'+(ctx.ad||'common')+'|'+ctx.ptype+'|'+ctx.lang+'|'+(ctx.idx||0);
+    const meta={owner:ctx.owner,project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:ctx.ptype,lang:ctx.lang,title:title,text:it.prompt||'',卖点:it.卖点||[]};
     sm.appendChild(favStar('prompt',ref,title,meta));}
   d.appendChild(sm);
   d.appendChild(tags(it.卖点));d.appendChild(promptBlock(it.prompt||''));
@@ -1155,7 +1162,7 @@ async function doRevise(ptype,ctx,sellingBox,ta,btn){
   if(sellingBox){selling=sellingBox._get();}
   if(!instruction&&(!selling||!selling.length)){alert('请填写新卖点或修改需求');return}
   btn.disabled=true;btn.textContent='提交中…';
-  const body={project_id:proj(),batch:ctx.batch||'',ad:(ptype==='common'?'':(ctx.ad||'')),ptype:ptype,
+  const body={project_id:(_ctxProject||proj()),owner:(_ctxOwner||_user),batch:ctx.batch||'',ad:(ptype==='common'?'':(ctx.ad||'')),ptype:ptype,
     idx:(ctx.idx!=null?ctx.idx:null),selling:selling,instruction:instruction,
     product:$('#product').value.trim()||'',
     openrouter_key:$('#orkey').value.trim()||null,deepseek_key:$('#dskey').value.trim()||null,
@@ -1226,8 +1233,8 @@ function promptItemFull(o){
   bar.appendChild(bz);bar.appendChild(be);ctl.appendChild(bar);
   if(o.clipUrl){const pb=document.createElement('button');pb.className='iconbtn';pb.title='小窗播放原镜头片段';pb.textContent='▶';
     pb.onclick=e=>{e.stopPropagation();e.preventDefault();openClip(o.clipUrl);};ctl.appendChild(pb);}
-  const ref='prompt|'+o.project+'|'+o.batch+'|'+(o.ad||'common')+'|'+o.ptype+'|'+(o.idx||0);
-  const meta={project:o.project,batch:o.batch,ad:o.ad,ptype:o.ptype,idx:o.idx,title:title,text:it.prompt||'',卖点:it.卖点||[]};
+  const ref='prompt|'+(o.owner||'')+'|'+o.project+'|'+o.batch+'|'+(o.ad||'common')+'|'+o.ptype+'|'+(o.idx||0);
+  const meta={owner:o.owner,project:o.project,batch:o.batch,ad:o.ad,ptype:o.ptype,idx:o.idx,title:title,text:it.prompt||'',卖点:it.卖点||[]};
   if(o.clipUrl){meta.clipUrl=o.clipUrl;meta.name=(o.clipUrl.split('/').pop()||'').split('?')[0];}
   ctl.appendChild(favStar('prompt',ref,title,meta));
   sm.appendChild(ctl);d.appendChild(sm);
@@ -1261,8 +1268,8 @@ function buildAggBox(agg){
 function buildVpBox(vp,ctx){
   vp=vp||{};const det=document.createElement('details');det.open=true;
   const sm=document.createElement('summary');sm.textContent='视频级脚本 prompt';
-  if(ctx){const ref='prompt|'+ctx.project+'|'+ctx.batch+'|'+ctx.ad+'|video|'+ctx.lang;
-    const meta={project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:'video',lang:ctx.lang,title:'视频级脚本 prompt',text:vp.video_prompt_text||''};
+  if(ctx){const ref='prompt|'+(ctx.owner||'')+'|'+ctx.project+'|'+ctx.batch+'|'+ctx.ad+'|video|'+ctx.lang;
+    const meta={owner:ctx.owner,project:ctx.project,batch:ctx.batch,ad:ctx.ad,ptype:'video',lang:ctx.lang,title:'视频级脚本 prompt',text:vp.video_prompt_text||''};
     sm.appendChild(favStar('prompt',ref,'视频级脚本 prompt',meta));}
   det.appendChild(sm);
   det.appendChild(promptBlock(vp.video_prompt_text||''));
@@ -1273,7 +1280,7 @@ function buildSpBox(sp,ctx,videos){
   const list=((sp||{}).镜头级prompt列表)||[];const det=document.createElement('details');det.open=true;
   const sm=document.createElement('summary');sm.textContent='镜头 prompt 素材（'+list.length+' 条 · 逐镜头）';det.appendChild(sm);
   list.forEach((it,i)=>det.appendChild(promptItemFull({
-    ptype:'shot',project:ctx.project,batch:ctx.batch,ad:ctx.ad,idx:i,zhItem:it,clipUrl:clipForShot(videos,it,i),
+    ptype:'shot',owner:ctx.owner,project:ctx.project,batch:ctx.batch,ad:ctx.ad,idx:i,zhItem:it,clipUrl:clipForShot(videos,it,i),
     getEnItem:()=>{const a=_adOf(ctx.batch,ctx.ad);const l=a&&a.sp_en&&a.sp_en.镜头级prompt列表;return l?l[i]:null;}})));
   return det;
 }
@@ -1281,7 +1288,7 @@ function buildCommonBody(v,ctx){
   v=v||{};const f=document.createDocumentFragment();
   if(v.商品共性卖点)f.appendChild(tags(v.商品共性卖点));
   ((v.共性镜头prompt列表)||[]).forEach((it,i)=>f.appendChild(promptItemFull({
-    ptype:'common',project:ctx.project,batch:ctx.batch,ad:'common',idx:i,zhItem:it,
+    ptype:'common',owner:ctx.owner,project:ctx.project,batch:ctx.batch,ad:'common',idx:i,zhItem:it,
     getEnItem:()=>{const b=_res&&_res.batches&&_res.batches[ctx.batch];const l=b&&b.common_en&&b.common_en.共性镜头prompt列表;return l?l[i]:null;}})));
   return f;
 }
@@ -1289,7 +1296,7 @@ function buildCommonBody(v,ctx){
 function renderAdDetail(batch,ad,d,videos){
   const frag=document.createDocumentFragment();const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
   if(d.source){const p=document.createElement('div');p.style.margin='4px 0';p.innerHTML='<b>原视频：</b><a href="'+d.source+'" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">'+d.source+'</a>';frag.appendChild(p)}
-  if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本项目」生成卖点/脚本）';frag.appendChild(p)}
+  if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本分组」生成卖点/脚本）';frag.appendChild(p)}
   if(videos.length){
     const det=document.createElement('details');det.open=true;
     const sm=document.createElement('summary');sm.textContent='镜头切片（'+videos.length+'）';det.appendChild(sm);
@@ -1305,7 +1312,7 @@ function renderAdDetail(batch,ad,d,videos){
       w.appendChild(cell);});
     det.appendChild(w);frag.appendChild(det);
   }
-  const vpctx={project:proj(),batch:batch,ad:ad,lang:'zh'};
+  const vpctx={owner:(_ctxOwner||_user),project:(_ctxProject||proj()),batch:batch,ad:ad,lang:'zh'};
   if(agg.广告主张||agg.商品卖点||agg.解决痛点){
     frag.appendChild(biBlock(buildAggBox(agg),'en|'+batch+'|'+ad+'|agg',
       ()=>{const a=_adOf(batch,ad);return hasContent(a&&a.agg_en)?a.agg_en:null;},buildAggBox));
@@ -1327,7 +1334,7 @@ function renderCommon(v,batch){
   c.innerHTML='<h2>品类共性镜头库 · '+(v.品类||'')+' <span class="muted" style="font-weight:400">（'+list.length+' 条 · 本批次归纳）</span></h2>';
   const dc=document.createElement('button');dc.className='mini dlbtn';dc.title='下载共性(json)';dc.innerHTML=IC.dl;dc.dataset.ic=IC.dl;
   dc.style.cssText='position:absolute;top:16px;right:16px';dc.onclick=()=>{downloadObj(v,(batch?batch+'_':'')+'共性镜头prompt.json');markDone(dc);};c.appendChild(dc);
-  c.appendChild(buildCommonBody(v,{project:proj(),batch:batch,ad:'common'}));   // 每条共性prompt自带中/EN与收藏
+  c.appendChild(buildCommonBody(v,{owner:(_ctxOwner||_user),project:(_ctxProject||proj()),batch:batch,ad:'common'}));   // 每条共性prompt自带中/EN与收藏
   return c;
 }
 

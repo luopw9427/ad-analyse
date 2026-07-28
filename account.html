@@ -81,7 +81,7 @@ async function boot(){
    '<div class="card"><div style="display:flex;align-items:center;gap:16px">'
    +'<div class="avatar">'+(me.username||'?').slice(0,1).toUpperCase()+'</div>'
    +'<div><div style="font-size:18px;font-weight:700">'+me.username+' <span class="rolechip '+(admin?'':'user')+'">'+(admin?'管理员':'成员')+'</span></div>'
-   +'<div class="muted" style="font-size:12.5px;margin-top:4px">当前项目：'+prj+'</div></div>'
+   +'<div class="muted" style="font-size:12.5px;margin-top:4px">当前分组：'+prj+'</div></div>'
    +(admin?'<button class="primary" style="margin-left:auto" onclick="location.href=\'/admin\'">进入后台管理</button>':'')
    +'</div></div>'
    +'<div class="grid2">'
@@ -89,7 +89,7 @@ async function boot(){
    +'<div class="card"><h2>'+ICON.star+' 我的收藏（'+favs.length+'）</h2><div class="list">'+fl+'</div></div>'
    +'</div>'
    +'<div class="card"><h2>'+ICON.gear+' 我的配置</h2>'
-   +'<div class="kv"><b>当前项目</b><span>'+prj+'</span></div>'
+   +'<div class="kv"><b>当前分组</b><span>'+prj+'</span></div>'
    +'<div class="kv"><b>OpenRouter Key</b><span>'+(ork?'已自填（仅本机浏览器）':'用服务端密钥')+'</span></div>'
    +'<div class="kv"><b>DeepSeek Key</b><span>'+(dsk?'已自填（仅本机浏览器）':'用服务端密钥')+'</span></div>'
    +'<div class="muted" style="font-size:11.5px;margin-top:6px">Key 只保存在本机浏览器，不上传；在主页顶栏修改。</div></div>'
