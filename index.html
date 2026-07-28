@@ -158,6 +158,13 @@
   .show-sb::-webkit-scrollbar-thumb{background:rgba(120,132,150,.45)}   /* 真实滚动时 */
   *{scrollbar-width:thin;scrollbar-color:transparent transparent}
   .show-sb{scrollbar-color:rgba(120,132,150,.45) transparent}
+  /* 上传拖拽区 */
+  .dropzone{border:1.5px dashed var(--line-2);border-radius:11px;padding:11px 16px;display:inline-flex;align-items:center;gap:9px;
+    cursor:pointer;color:var(--sub);font-size:13px;background:var(--panel-2);transition:.15s;min-width:250px;max-width:340px}
+  .dropzone:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-weak)}
+  .dropzone.drag{border-color:var(--accent);background:var(--accent-weak);color:var(--accent)}
+  .dropzone svg{flex:0 0 auto;opacity:.8}
+  .dropzone .fz-count{margin-left:auto;font-size:11.5px;color:var(--muted);white-space:nowrap}
   /* 切片悬停操作条 + 小窗播放 */
   .clipcell{position:relative}
   .clipcell .clipbar{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;justify-content:center;padding:6px;
@@ -251,39 +258,38 @@
   <div class="card" id="ops">
     <h2>操作</h2>
     <div class="row">
-      <b>① 上传拆分：</b>
-      <input type="file" id="files" accept="video/*" multiple>
+      <b>① 拆分</b>
+      <div class="dropzone" id="dropzone" onclick="document.getElementById('files').click()"
+           title="拖入本地视频，或点击选择（可多选）。文件名将作为广告 id">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+        <span id="dz-text">拖入视频，或点击选择（可多选）</span>
+        <span class="fz-count" id="dz-count"></span>
+      </div>
+      <input type="file" id="files" accept="video/*" multiple style="display:none" onchange="onFilesPicked()">
       <button id="btnSplit" onclick="doSplit()">上传并拆分</button>
-      <span class="muted">引擎</span>
-      <select id="engine">
-        <option value="gpu">GPU (Modal·快)</option>
-        <option value="cpu">CPU (Railway·慢)</option>
+      <select id="engine" title="拆分引擎">
+        <option value="gpu">GPU · 快</option>
+        <option value="cpu">CPU · 慢</option>
       </select>
-      <label class="ck"><input type="checkbox" id="fast"> 快速切分(不重编码·可能重复/不准)</label>
+      <label class="ck"><input type="checkbox" id="fast" title="不重编码，快但可能重复/不准"> 快速切分</label>
       <label class="ck"><input type="checkbox" id="keepraw"> 保留原视频</label>
-      <span class="muted">文件名会作为广告 id</span>
     </div>
     <div class="row">
       <b style="visibility:hidden">①</b>
-      <span class="muted">或粘贴视频直链</span>
-      <input id="vurl" placeholder="https://…/xxx.mp4，一次一个" size="34">
+      <input id="vurl" placeholder="或粘贴视频直链 https://…/xxx.mp4" size="36">
       <button class="ghost" onclick="addUrl()">添加到本批</button>
       <span id="urlchips" class="tags"></span>
     </div>
     <div class="row">
-      <b>② 分析：</b>
+      <b>② 分析</b>
       <button id="btnAnalyze" onclick="doAnalyze()">开始分析本批次</button>
-      <label class="ck"><input type="checkbox" id="cc"> 生成横向对比</label>
-      <label class="ck"><input type="checkbox" id="pro"> 用更强模型(Pro,贵)</label>
-      <label class="ck"><input type="checkbox" id="ow"> 强制重跑</label>
-    </div>
-    <div class="row">
-      <span class="muted">产品名</span>
-      <input id="product" placeholder="如 钻石画" size="14"
+      <input id="product" placeholder="产品名，如 钻石画" size="15"
              title="这批广告卖的产品，作为提示传给分析模型（只影响分析，不影响拆分）">
-      <span class="muted">前置卖点（可选）</span>
-      <input id="hyp" placeholder="如：免养护,开箱即用,送礼首选" size="32"
-             title="已知的卖点，逗号分隔。供分析模型参考验证，可留空">
+      <input id="hyp" placeholder="前置卖点（可选，逗号分隔）" size="26"
+             title="已知的卖点，供分析模型参考验证，可留空">
+      <label class="ck"><input type="checkbox" id="cc"> 横向对比</label>
+      <label class="ck"><input type="checkbox" id="pro" title="用更强模型，更贵"> Pro 模型</label>
+      <label class="ck"><input type="checkbox" id="ow"> 强制重跑</label>
     </div>
     <div class="log" id="opslog"></div>
   </div>
@@ -461,6 +467,25 @@ async function waitJob(jid,onTick){
   }
 }
 
+// ===== 上传：拖拽 + 计数 =====
+function onFilesPicked(){
+  const n=$('#files').files.length;
+  $('#dz-count').textContent=n?(n+' 个'):'';
+  $('#dz-text').textContent=n?('已选 '+n+' 个视频，可继续拖入/点击追加'):'拖入视频，或点击选择（可多选）';
+}
+function wireDrop(){
+  const dz=$('#dropzone');if(!dz)return;
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();e.stopPropagation();dz.classList.add('drag');}));
+  ['dragleave','dragend','drop'].forEach(ev=>dz.addEventListener(ev,e=>{if(ev!=='drop'){e.preventDefault();e.stopPropagation();}dz.classList.remove('drag');}));
+  dz.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();
+    const dropped=[...(e.dataTransfer.files||[])].filter(f=>(f.type||'').startsWith('video/')||/\.(mp4|mov|mkv|avi|webm|m4v)$/i.test(f.name));
+    if(!dropped.length){alert('请拖入视频文件');return;}
+    const dt=new DataTransfer();
+    [...$('#files').files].forEach(f=>dt.items.add(f));   // 保留已选，追加
+    dropped.forEach(f=>dt.items.add(f));
+    $('#files').files=dt.files;onFilesPicked();
+  });
+}
 // ===== 操作 =====
 async function doSplit(){
   remember();const files=$('#files').files;
@@ -484,7 +509,7 @@ async function doSplit(){
     const job=await waitJob(d.job_id);
     logOps((job.ok?'✓':'✗')+' 批次拆分：'+(job.detail||''));
   }catch(e){logOps('✗ 拆分失败 '+e.message)}
-  _urlList=[];renderUrlChips();setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
+  _urlList=[];renderUrlChips();$('#files').value='';onFilesPicked();setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
 }
 
 async function doAnalyze(){
@@ -1307,7 +1332,7 @@ function renderCommon(v,batch){
 }
 
 // 初始化：放在所有声明之后，避免 TDZ（wireDrawer 内含 measureHdr）
-wireDrawer();_drawerMode='all';renderDrawer();openDrawer();
+wireDrawer();wireDrop();_drawerMode='all';renderDrawer();openDrawer();
 bootAuth();   // 登录门：有有效 token 自动进入，否则显示登录页
 </script>
 </body>
