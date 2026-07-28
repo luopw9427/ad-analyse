@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>账户中心 · 视频广告分析</title>
+<style>
+  :root{--bg:#edf1f7;--panel:#fff;--panel-2:#f7f9fc;--ink:#1b2431;--sub:#5a6678;--muted:#9aa6b6;
+    --line:#e7ecf3;--line-2:#dde4ee;--accent:#2f6bed;--accent-ink:#1e51c4;--accent-weak:#eaf1fe;
+    --ok:#15a34a;--ok-bg:#e9f7ee;--pain:#c0561f;--pain-bg:#fbeee4;--r:14px;
+    --sh:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.05)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
+  .top{position:sticky;top:0;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+    padding:12px 22px;display:flex;align-items:center;gap:12px;z-index:5}
+  .top h1{font-size:16px;margin:0;font-weight:700;background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .wrap{max-width:760px;margin:22px auto;padding:0 18px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:18px;box-shadow:var(--sh)}
+  .card h2{font-size:14px;margin:0 0 14px;font-weight:700;display:flex;align-items:center;gap:9px;color:var(--ink)}
+  .card h2 svg{color:var(--accent)}
+  button{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:9px 16px;border-radius:9px;cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  button:hover{background:var(--accent-weak);color:var(--accent);border-color:var(--accent)}
+  button.primary{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff;border:0}
+  button.primary:hover{filter:brightness(1.06);color:#fff}
+  button.danger{color:var(--pain);border-color:#f0c9bb}
+  button.danger:hover{background:var(--pain-bg);color:var(--pain);border-color:var(--pain)}
+  button.link{background:transparent;border:0;color:var(--sub);padding:6px 8px}
+  button.link:hover{background:var(--panel-2);color:var(--accent)}
+  input{width:100%;background:#fff;border:1px solid var(--line-2);color:var(--ink);padding:10px 12px;border-radius:9px;font-size:13px;outline:none}
+  input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+  label{display:block;font-size:12px;color:var(--sub);margin:12px 0 5px}
+  .avatar{width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,#2f6bed,#5a52d8);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;flex:0 0 auto}
+  .rolechip{font-size:11px;padding:2px 10px;border-radius:20px;background:var(--accent-weak);color:var(--accent);font-weight:600}
+  .rolechip.user{background:var(--panel-2);color:var(--sub)}
+  .list{max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px}
+  .list .it{font-size:12.5px;color:var(--sub);padding:5px 8px;border-radius:7px}
+  .list .it:hover{background:var(--panel-2)}
+  .muted{color:var(--muted)}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:640px){.grid2{grid-template-columns:1fr}}
+  .kv{display:flex;gap:8px;font-size:12.5px;color:var(--sub);padding:4px 0}
+  .kv b{color:var(--ink);font-weight:600;min-width:96px}
+  .err{color:var(--pain);font-size:12.5px;min-height:16px;margin-top:8px}
+  .ok{color:var(--ok)}
+</style>
+</head>
+<body>
+<div class="top">
+  <button class="link" onclick="location.href='/'">← 返回</button>
+  <h1>账户中心</h1>
+</div>
+<div class="wrap" id="wrap"><div class="muted" style="padding:40px;text-align:center">加载中…</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+function T(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||''}catch(e){return ''}}
+function logout(){try{localStorage.removeItem('authToken');sessionStorage.removeItem('authToken')}catch(e){}location.href='/'}
+async function api(p,opt){opt=opt||{};opt.headers=Object.assign({'Authorization':'Bearer '+T(),'Content-Type':'application/json'},opt.headers||{});
+  const r=await fetch(p,opt);if(r.status===401){location.href='/';throw new Error('401')}
+  if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.detail||('HTTP '+r.status))}return r.json()}
+const ICON={user:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  list:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="20" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="18" x2="20" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg>',
+  star:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.9 6 6.6.6-5 4.3 1.5 6.5L12 17l-6 3.4 1.5-6.5-5-4.3 6.6-.6z"/></svg>',
+  key:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="4"/><path d="M11 11l9 9"/><path d="M17 17l2-2"/><path d="M15 15l2-2"/></svg>',
+  gear:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>'};
+const kmap={split:'拆分',analyze:'分析',translate:'翻译',prompt_edit:'提示词修改'};
+const fkmap={task:'任务',prompt:'提示词',clip:'切片'};
+
+async function boot(){
+  if(!T()){location.href='/';return}
+  let me;try{me=await api('/auth/me')}catch(e){return}
+  let jobs=[],favs=[];
+  try{const d=await api('/jobs?limit=200');jobs=(d.jobs||[]).filter(j=>j.owner===me.username)}catch(e){}
+  try{const d=await api('/fav/list');favs=(d.favorites||[]).filter(f=>f.owner===me.username)}catch(e){}
+  const ork=localStorage.getItem('ork')||'',dsk=localStorage.getItem('dsk')||'',prj=localStorage.getItem('proj')||'-';
+  const admin=me.role==='admin';
+  const jl=jobs.slice(0,60).map(j=>'<div class="it">#'+j.id+' '+(kmap[j.kind]||j.kind)+' · '+(j.batch||'-')+' · '+j.status+'</div>').join('')||'<div class="it muted">暂无</div>';
+  const fl=favs.slice(0,60).map(f=>'<div class="it">['+(fkmap[f.kind]||f.kind)+'] '+((f.label||f.ref)+'').replace(/</g,'&lt;')+'</div>').join('')||'<div class="it muted">暂无</div>';
+  $('#wrap').innerHTML=
+   '<div class="card"><div style="display:flex;align-items:center;gap:16px">'
+   +'<div class="avatar">'+(me.username||'?').slice(0,1).toUpperCase()+'</div>'
+   +'<div><div style="font-size:18px;font-weight:700">'+me.username+' <span class="rolechip '+(admin?'':'user')+'">'+(admin?'管理员':'成员')+'</span></div>'
+   +'<div class="muted" style="font-size:12.5px;margin-top:4px">当前项目：'+prj+'</div></div>'
+   +(admin?'<button class="primary" style="margin-left:auto" onclick="location.href=\'/admin\'">进入后台管理</button>':'')
+   +'</div></div>'
+   +'<div class="grid2">'
+   +'<div class="card"><h2>'+ICON.list+' 我的任务（'+jobs.length+'）</h2><div class="list">'+jl+'</div></div>'
+   +'<div class="card"><h2>'+ICON.star+' 我的收藏（'+favs.length+'）</h2><div class="list">'+fl+'</div></div>'
+   +'</div>'
+   +'<div class="card"><h2>'+ICON.gear+' 我的配置</h2>'
+   +'<div class="kv"><b>当前项目</b><span>'+prj+'</span></div>'
+   +'<div class="kv"><b>OpenRouter Key</b><span>'+(ork?'已自填（仅本机浏览器）':'用服务端密钥')+'</span></div>'
+   +'<div class="kv"><b>DeepSeek Key</b><span>'+(dsk?'已自填（仅本机浏览器）':'用服务端密钥')+'</span></div>'
+   +'<div class="muted" style="font-size:11.5px;margin-top:6px">Key 只保存在本机浏览器，不上传；在主页顶栏修改。</div></div>'
+   +'<div class="card"><h2>'+ICON.key+' 账号设置</h2>'
+   +'<div style="max-width:340px">'
+   +'<label>原密码</label><input id="cp_old" type="password" placeholder="原密码">'
+   +'<label>新密码</label><input id="cp_new" type="password" placeholder="新密码">'
+   +'<div class="err" id="cp_err"></div>'
+   +'<div style="display:flex;gap:10px;margin-top:14px"><button class="primary" onclick="changePwd()">修改密码</button>'
+   +'<button class="danger" onclick="logout()">退出当前账号</button></div>'
+   +'<div class="muted" style="font-size:11.5px;margin-top:8px">改完密码需重新登录（其他设备的登录也会失效）。</div>'
+   +'</div></div>';
+}
+async function changePwd(){
+  const err=$('#cp_err');err.className='err';err.textContent='';
+  const old_pin=$('#cp_old').value,new_pin=$('#cp_new').value;
+  if(!new_pin){err.textContent='请输入新密码';return}
+  try{await api('/auth/change_pin',{method:'POST',body:JSON.stringify({old_pin,new_pin})});
+    err.className='err ok';err.textContent='已修改，即将重新登录…';setTimeout(logout,900);
+  }catch(e){err.textContent=e.message}
+}
+boot();
+</script>
+</body>
+</html>

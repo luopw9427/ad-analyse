@@ -106,7 +106,18 @@ def init_db():
                     UNIQUE (owner, ref)
                 )
             """)
-        print("[db] jobs / favorites 表就绪")
+            # 审计日志（登录/管理/删除等安全事件）
+            c.execute("""
+                CREATE TABLE IF NOT EXISTS audit_log (
+                    id       SERIAL PRIMARY KEY,
+                    ts       TIMESTAMPTZ DEFAULT now(),
+                    username TEXT,
+                    ip       TEXT,
+                    action   TEXT,
+                    detail   TEXT
+                )
+            """)
+        print("[db] jobs / favorites / audit_log 表就绪")
         # 服务重启说明之前的 running 任务已随进程消失，标记为中断，避免永远挂着
         with _conn() as c:
             cur = c.execute(
@@ -410,6 +421,86 @@ def user_delete(username: str) -> tuple:
             return (cur.rowcount > 0), ("ok" if cur.rowcount else "用户不存在")
     except Exception as e:
         return False, str(e)
+
+
+# ── 审计日志 + 数据库查看（管理员后台）─────────────────────────
+def audit(username: str, ip: str, action: str, detail: str = ""):
+    """记录一条安全审计。失败只打印，不影响主流程。"""
+    if not enabled():
+        return
+    try:
+        with _conn() as c:
+            c.execute("INSERT INTO audit_log (username, ip, action, detail) VALUES (%s,%s,%s,%s)",
+                      (username or "", ip or "", action or "", (detail or "")[:1000]))
+    except Exception as e:
+        print(f"[db] audit 失败: {e}")
+
+
+def audit_list(limit: int = 200, username: str = "", action: str = ""):
+    if not enabled():
+        return []
+    try:
+        where, args = [], []
+        if username:
+            where.append("username=%s"); args.append(username)
+        if action:
+            where.append("action=%s"); args.append(action)
+        sql = "SELECT id, ts, username, ip, action, detail FROM audit_log"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY id DESC LIMIT %s"; args.append(limit)
+        with _conn() as c:
+            rows = c.execute(sql, tuple(args)).fetchall()
+        return [{"id": r[0], "ts": str(r[1]), "username": r[2], "ip": r[3],
+                 "action": r[4], "detail": r[5]} for r in rows]
+    except Exception as e:
+        print(f"[db] audit_list 失败: {e}")
+        return []
+
+
+# 只读表查看白名单：逻辑名 -> (真实表, 列, 排序)
+_TABLES = {
+    "users":     ("fav_users", ["username", "role", "disabled", "created_at"], "username ASC"),
+    "jobs":      ("jobs", ["id", "kind", "project_id", "batch", "product", "owner", "status", "duration_sec", "cost_usd", "created_at"], "id DESC"),
+    "favorites": ("favorites", ["id", "owner", "kind", "ref", "label", "created_at"], "id DESC"),
+    "audit":     ("audit_log", ["id", "ts", "username", "ip", "action", "detail"], "id DESC"),
+}
+
+
+def table_rows(name: str, limit: int = 200):
+    """只读查看白名单表。返回 {cols, rows}。"""
+    if not enabled() or name not in _TABLES:
+        return {"cols": [], "rows": []}
+    tbl, cols, order = _TABLES[name]
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                f"SELECT {', '.join(cols)} FROM {tbl} ORDER BY {order} LIMIT %s", (limit,)
+            ).fetchall()
+        out = []
+        for r in rows:
+            out.append([("" if v is None else str(v)) for v in r])
+        return {"cols": cols, "rows": out}
+    except Exception as e:
+        print(f"[db] table_rows 失败: {e}")
+        return {"cols": [], "rows": []}
+
+
+def db_stats():
+    """各表行数统计。"""
+    if not enabled():
+        return {}
+    out = {}
+    try:
+        with _conn() as c:
+            for name, (tbl, _, _) in _TABLES.items():
+                try:
+                    out[name] = c.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+                except Exception:
+                    out[name] = 0
+    except Exception as e:
+        print(f"[db] db_stats 失败: {e}")
+    return out
 
 
 def admin_count() -> int:

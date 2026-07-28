@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>管理员后台 · 视频广告分析</title>
+<style>
+  :root{--bg:#edf1f7;--panel:#fff;--panel-2:#f7f9fc;--ink:#1b2431;--sub:#5a6678;--muted:#9aa6b6;
+    --line:#e7ecf3;--line-2:#dde4ee;--accent:#2f6bed;--accent-ink:#1e51c4;--accent-weak:#eaf1fe;
+    --ok:#15a34a;--ok-bg:#e9f7ee;--pain:#c0561f;--pain-bg:#fbeee4;--r:14px;
+    --sh:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.05)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px}
+  .top{position:sticky;top:0;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);
+    padding:12px 22px;display:flex;align-items:center;gap:12px;z-index:5}
+  .top h1{font-size:16px;margin:0;font-weight:700;background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .wrap{max-width:1180px;margin:20px auto;padding:0 18px 60px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px;margin-bottom:16px;box-shadow:var(--sh)}
+  button{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:7px 12px;border-radius:8px;cursor:pointer;font-size:12.5px;font-weight:600;transition:.15s}
+  button:hover{background:var(--accent-weak);color:var(--accent);border-color:var(--accent)}
+  button.link{background:transparent;border:0;color:var(--sub);padding:6px 8px}
+  button.link:hover{background:var(--panel-2);color:var(--accent)}
+  button.mini{padding:3px 9px;font-size:11.5px;background:var(--panel-2);margin-right:4px}
+  button.del{color:var(--pain);border-color:#f0c9bb;background:#fff}
+  button.del:hover{background:var(--pain-bg)}
+  input,select{background:#fff;border:1px solid var(--line-2);color:var(--ink);padding:7px 10px;border-radius:8px;font-size:12.5px;outline:none}
+  input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+  .tabs{display:flex;gap:6px;margin-bottom:16px;flex-wrap:wrap}
+  .tabs button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .stats{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 18px;min-width:110px;box-shadow:var(--sh)}
+  .stat .n{font-size:22px;font-weight:800;color:var(--accent)}
+  .stat .l{font-size:12px;color:var(--sub);margin-top:2px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+  thead th{color:var(--sub);font-weight:600;background:var(--panel-2)}
+  tbody tr:hover{background:var(--panel-2)}
+  .scroll{overflow:auto;max-height:62vh;border:1px solid var(--line);border-radius:10px}
+  .rolechip{font-size:11px;padding:1px 8px;border-radius:20px;background:var(--accent-weak);color:var(--accent)}
+  .rolechip.user{background:var(--panel-2);color:var(--sub)}
+  .muted{color:var(--muted)}
+  .actchip{font-size:11px;padding:1px 8px;border-radius:20px;background:var(--panel-2);color:var(--sub)}
+  .actchip.warn{background:var(--pain-bg);color:var(--pain)}
+  .actchip.ok{background:var(--ok-bg);color:var(--ok)}
+  h3{font-size:13px;margin:0 0 12px;color:var(--ink)}
+</style>
+</head>
+<body>
+<div class="top">
+  <button class="link" onclick="location.href='/'">← 返回</button>
+  <h1>管理员后台</h1>
+  <span class="muted" id="who" style="margin-left:8px;font-size:12.5px"></span>
+</div>
+<div class="wrap" id="wrap"><div class="muted" style="padding:40px;text-align:center">加载中…</div></div>
+
+<script>
+const $=s=>document.querySelector(s);
+function T(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||''}catch(e){return ''}}
+async function api(p,opt){opt=opt||{};opt.headers=Object.assign({'Authorization':'Bearer '+T(),'Content-Type':'application/json'},opt.headers||{});
+  const r=await fetch(p,opt);if(r.status===401){location.href='/';throw new Error('401')}
+  if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.detail||('HTTP '+r.status))}return r.json()}
+let ME=null,TAB='users';
+const ACT={login:['登录','ok'],login_fail:['登录失败','warn'],user_create:['建号',''],user_role:['改角色',''],
+  user_reset_pin:['重置密码',''],user_disable:['禁用/启用',''],user_delete:['删用户','warn'],
+  r2_delete:['删R2数据','warn'],job_delete:['删任务','warn']};
+const TBL={users:'用户',jobs:'任务',favorites:'收藏',audit:'日志'};
+
+async function boot(){
+  if(!T()){location.href='/';return}
+  try{ME=await api('/auth/me')}catch(e){return}
+  $('#who').textContent=ME.username;
+  if(ME.role!=='admin'){$('#wrap').innerHTML='<div class="card" style="text-align:center;color:var(--pain)">无权限：仅管理员可访问后台。<div style="margin-top:12px"><button onclick="location.href=\'/\'">返回主页</button></div></div>';return}
+  render();
+}
+async function render(){
+  let stats={};try{const d=await api('/admin/stats');stats=d.stats||{}}catch(e){}
+  const statHtml='<div class="stats">'+['users','jobs','favorites','audit'].map(k=>
+    '<div class="stat"><div class="n">'+(stats[k]!=null?stats[k]:'-')+'</div><div class="l">'+TBL[k]+'</div></div>').join('')+'</div>';
+  const tabsHtml='<div class="tabs">'
+    +'<button class="'+(TAB==='users'?'on':'')+'" onclick="go(\'users\')">用户管理</button>'
+    +'<button class="'+(TAB==='audit'?'on':'')+'" onclick="go(\'audit\')">登录 / 操作日志</button>'
+    +'<button class="'+(TAB==='db'?'on':'')+'" onclick="go(\'db\')">数据库查看</button></div>';
+  $('#wrap').innerHTML=statHtml+tabsHtml+'<div class="card" id="tabbody"><div class="muted">加载中…</div></div>';
+  if(TAB==='users')renderUsers();
+  else if(TAB==='audit')renderAudit();
+  else renderDb();
+}
+function go(t){TAB=t;render()}
+
+// 用户管理
+async function renderUsers(){
+  const box=$('#tabbody');
+  let h='<h3>用户管理</h3><div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">'
+    +'<input id="nu_user" placeholder="用户名" size="10"><input id="nu_pin" placeholder="初始密码" size="10">'
+    +'<select id="nu_role"><option value="user">普通用户</option><option value="admin">管理员</option></select>'
+    +'<button class="mini" onclick="createUser()">新建用户</button></div>';
+  try{const d=await api('/users');
+    h+='<div class="scroll"><table><thead><tr><th>用户名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody>';
+    (d.users||[]).forEach(u=>{const me=u.username===ME.username;
+      h+='<tr><td>'+u.username+(me?' （我）':'')+'</td>'
+       +'<td><span class="rolechip '+(u.role==='admin'?'':'user')+'">'+(u.role==='admin'?'管理员':'成员')+'</span></td>'
+       +'<td class="muted">'+(u.disabled?'已禁用':'正常')+'</td><td>'
+       +(me?'':'<button class="mini" onclick="setRole(\''+u.username+'\',\''+(u.role==='admin'?'user':'admin')+'\')">'+(u.role==='admin'?'降为成员':'升为管理员')+'</button>')
+       +'<button class="mini" onclick="resetPin(\''+u.username+'\')">重置密码</button>'
+       +(me?'':'<button class="mini" onclick="setDisable(\''+u.username+'\','+(u.disabled?'false':'true')+')">'+(u.disabled?'启用':'禁用')+'</button>')
+       +(me?'':'<button class="mini del" onclick="delUser(\''+u.username+'\')">删除</button>')
+       +'</td></tr>';});
+    h+='</tbody></table></div>';box.innerHTML=h;
+  }catch(e){box.innerHTML=h+'<div class="muted">加载失败：'+e.message+'</div>'}
+}
+async function _post(p,b){try{await api(p,{method:'POST',body:JSON.stringify(b)});return true}catch(e){alert(e.message);return false}}
+async function createUser(){const username=$('#nu_user').value.trim(),pin=$('#nu_pin').value,role=$('#nu_role').value;if(!username){alert('填用户名');return}if(await _post('/users',{username,pin,role}))renderUsers()}
+async function setRole(u,r){if(await _post('/users/role',{username:u,role:r}))renderUsers()}
+async function resetPin(u){const pin=prompt('给「'+u+'」设新密码：');if(pin==null)return;if(await _post('/users/reset_pin',{username:u,pin}))alert('已重置')}
+async function setDisable(u,d){if(await _post('/users/disable',{username:u,disabled:d}))renderUsers()}
+async function delUser(u){if(!confirm('删除用户 '+u+'？'))return;if(await _post('/users/delete',{username:u}))renderUsers()}
+
+// 审计日志
+async function renderAudit(){
+  const box=$('#tabbody');
+  let h='<h3>登录 / 操作日志（含 IP、时间、操作人、动作）</h3>'
+   +'<div style="margin-bottom:10px"><button class="mini" onclick="renderAudit()">刷新</button></div>';
+  try{const d=await api('/admin/audit?limit=300');
+    h+='<div class="scroll"><table><thead><tr><th>时间</th><th>用户</th><th>IP</th><th>动作</th><th>详情</th></tr></thead><tbody>';
+    (d.audit||[]).forEach(a=>{const m=ACT[a.action]||[a.action,''];
+      h+='<tr><td class="muted">'+(a.ts||'').slice(0,19)+'</td><td>'+(a.username||'-')+'</td>'
+       +'<td class="muted">'+(a.ip||'-')+'</td><td><span class="actchip '+m[1]+'">'+m[0]+'</span></td>'
+       +'<td class="muted">'+((a.detail||'')+'').replace(/</g,'&lt;')+'</td></tr>';});
+    h+='</tbody></table></div>';box.innerHTML=h;
+  }catch(e){box.innerHTML=h+'<div class="muted">加载失败：'+e.message+'</div>'}
+}
+
+// 数据库查看
+let DBT='jobs';
+async function renderDb(){
+  const box=$('#tabbody');
+  let sub='<div class="tabs">'+Object.keys(TBL).map(k=>
+    '<button class="'+(DBT===k?'on':'')+'" onclick="setDbt(\''+k+'\')">'+TBL[k]+' 表</button>').join('')+'</div>';
+  box.innerHTML='<h3>数据库查看（只读）</h3>'+sub+'<div id="dbbody"><div class="muted">加载中…</div></div>';
+  try{const d=await api('/admin/table?name='+DBT+'&limit=300');
+    let h='<div class="scroll"><table><thead><tr>'+(d.cols||[]).map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
+    (d.rows||[]).forEach(r=>{h+='<tr>'+r.map(v=>'<td class="muted">'+((v||'')+'').slice(0,120).replace(/</g,'&lt;')+'</td>').join('')+'</tr>';});
+    h+='</tbody></table></div><div class="muted" style="margin-top:8px;font-size:11.5px">最多显示 300 行。</div>';
+    $('#dbbody').innerHTML=h;
+  }catch(e){$('#dbbody').innerHTML='<div class="muted">加载失败：'+e.message+'</div>'}
+}
+function setDbt(t){DBT=t;renderDb()}
+boot();
+</script>
+</body>
+</html>

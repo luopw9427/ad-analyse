@@ -237,9 +237,9 @@
       <button class="avatar" id="avatarBtn" title="账号">U</button>
       <div class="usermenu-pop">
         <div class="um-head"><b id="um-name"></b> <span id="um-role" class="muted"></span></div>
-        <button class="um-item" onclick="openPersonal()">个人中心</button>
-        <button class="um-item" onclick="openAccount()">账号设置</button>
-        <button class="um-item" id="um-users" style="display:none" onclick="openUsers()">用户管理</button>
+        <button class="um-item" onclick="location.href='/account'">个人中心</button>
+        <button class="um-item" onclick="location.href='/account'">账号设置</button>
+        <button class="um-item" id="um-admin" style="display:none" onclick="location.href='/admin'">后台管理</button>
       </div>
     </div>
   </span>
@@ -334,43 +334,6 @@
   <div class="autherr" id="lg_err"></div>
 </div></div>
 
-<div id="usersModal" class="modal"><div class="box">
-  <button class="mini x" onclick="closeUsers()">✕</button>
-  <h3>用户管理</h3>
-  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-    <input id="nu_user" type="text" placeholder="用户名" size="10">
-    <input id="nu_pin" type="text" placeholder="初始密码" size="10">
-    <select id="nu_role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
-    <button class="mini" onclick="createUser()">新建用户</button>
-  </div>
-  <div id="usersList"></div>
-</div></div>
-
-<div id="accountModal" class="modal"><div class="box" style="width:min(340px,92vw)">
-  <button class="mini x" onclick="closeAccount()">✕</button>
-  <h3>账号设置</h3>
-  <button class="mini" style="display:block;width:100%;margin:8px 0" onclick="closeAccount();openChangePin()">修改密码</button>
-  <button class="mini del" style="display:block;width:100%" onclick="doLogout()">退出当前账号</button>
-</div></div>
-
-<div id="personalModal" class="modal"><div class="box">
-  <button class="mini x" onclick="closePersonal()">✕</button>
-  <h3>个人中心</h3>
-  <div id="personalBody"></div>
-</div></div>
-
-<div id="pinModal" class="modal"><div class="box" style="width:min(360px,92vw)">
-  <button class="mini x" onclick="closePin()">✕</button>
-  <h3>修改密码</h3>
-  <label style="font-size:12px;color:var(--sub)">原密码</label>
-  <input id="cp_old" type="password" style="width:100%;margin:4px 0 10px">
-  <label style="font-size:12px;color:var(--sub)">新密码</label>
-  <input id="cp_new" type="password" style="width:100%;margin:4px 0 10px">
-  <div class="autherr" id="cp_err"></div>
-  <button class="mini" onclick="changePin()">确认修改</button>
-  <div class="muted" style="font-size:11px;margin-top:8px">改完需重新登录（旧登录会失效）。</div>
-</div></div>
-
 <script>
 const $=s=>document.querySelector(s);
 const proj=()=>$('#project').value.trim();
@@ -388,7 +351,7 @@ function applyUser(u,r){_user=u;_role=r;
   const nm=$('#um-name');if(nm)nm.textContent=u;
   const rl=$('#um-role');if(rl)rl.textContent=(r==='admin'?'· 管理员':'');   // 成员不显示角色
   const av=$('#avatarBtn');if(av)av.textContent=(u||'?').slice(0,1).toUpperCase();
-  const uu=$('#um-users');if(uu)uu.style.display=(r==='admin'?'':'none');}
+  const uu=$('#um-admin');if(uu)uu.style.display=(r==='admin'?'':'none');}
 async function doLogin(){
   const err=$('#lg_err');err.textContent='';
   const username=$('#lg_user').value.trim(),pin=$('#lg_pin').value,remember=$('#lg_remember').checked;

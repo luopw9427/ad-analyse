@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form, Depends, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 import zipfile
@@ -150,6 +150,14 @@ def require_admin(user: dict = Depends(current_user)):
     return user
 
 
+def _client_ip(request: Request) -> str:
+    """取真实客户端 IP（Railway 等反代下用 X-Forwarded-For 首个）。"""
+    xff = request.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
 class AnalyzeReq(BaseModel):
     project_id: str
     product: str
@@ -179,6 +187,20 @@ def home():
 def prompts_page():
     """提示词编辑页（单页）。"""
     return FileResponse(ROOT / "prompts.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/account")
+def account_page():
+    """个人中心 / 账号设置（独立页）。"""
+    return FileResponse(ROOT / "account.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/admin")
+def admin_page():
+    """管理员后台（独立页）。"""
+    return FileResponse(ROOT / "admin.html",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
@@ -586,8 +608,10 @@ class DeleteReq(BaseModel):
 
 
 @app.post("/delete")
-def delete(req: DeleteReq, user: dict = Depends(current_user)):
+def delete(req: DeleteReq, request: Request, user: dict = Depends(current_user)):
     """删除 R2 上的产物，释放存储。权限：管理员随意；普通用户仅限自己创建的批次；整项目删除仅管理员。"""
+    db.audit(user["username"], _client_ip(request), "r2_delete",
+             f"项目={req.project_id} 批次={req.batch or '-'} 广告={req.ad_id or '-'}{' 仅分析' if req.analysis_only else ''}")
     if not req.project_id:
         raise HTTPException(status_code=400, detail="缺少 project_id")
 
@@ -704,9 +728,12 @@ def download(project_id: str, ad_id: str = "", batch: str = "", user: dict = Dep
 
 
 @app.post("/jobs/delete")
-def jobs_delete(req: JobDeleteReq, user: dict = Depends(current_user)):
+def jobs_delete(req: JobDeleteReq, request: Request, user: dict = Depends(current_user)):
     """删除单条任务记录（不动 R2 文件）。非管理员只能删自己的。"""
-    return {"ok": True, "deleted": db.delete_job(req.job_id, user["username"], user["role"] == "admin")}
+    n = db.delete_job(req.job_id, user["username"], user["role"] == "admin")
+    if n:
+        db.audit(user["username"], _client_ip(request), "job_delete", f"#{req.job_id}")
+    return {"ok": True, "deleted": n}
 
 
 @app.get("/download_file")
@@ -776,11 +803,14 @@ class ChangePinReq(BaseModel):
 
 
 @app.post("/auth/login")
-def auth_login(req: LoginReq):
+def auth_login(req: LoginReq, request: Request):
+    ip = _client_ip(request)
     u = db.user_verify(req.username.strip(), req.pin)
     if not u:
+        db.audit(req.username.strip(), ip, "login_fail", "用户名或密码错误")
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     token = make_token(u["username"], u["role"], u["pin_ver"], req.remember)
+    db.audit(u["username"], ip, "login", "记住登录" if req.remember else "本次会话")
     return {"ok": True, "token": token, "username": u["username"], "role": u["role"]}
 
 
@@ -829,43 +859,47 @@ def users_list(admin: dict = Depends(require_admin)):
 
 
 @app.post("/users")
-def users_create(req: UserCreateReq, admin: dict = Depends(require_admin)):
+def users_create(req: UserCreateReq, request: Request, admin: dict = Depends(require_admin)):
     ok, msg = db.user_create(req.username, req.pin, req.role)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
+    db.audit(admin["username"], _client_ip(request), "user_create", f"{req.username}({req.role})")
     return {"ok": True}
 
 
 @app.post("/users/role")
-def users_role(req: UserRoleReq, admin: dict = Depends(require_admin)):
+def users_role(req: UserRoleReq, request: Request, admin: dict = Depends(require_admin)):
     if req.username == admin["username"] and req.role != "admin":
         raise HTTPException(status_code=400, detail="不能取消自己的管理员权限")
     ok, msg = db.user_set_role(req.username, req.role)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
+    db.audit(admin["username"], _client_ip(request), "user_role", f"{req.username}→{req.role}")
     return {"ok": True}
 
 
 @app.post("/users/reset_pin")
-def users_reset_pin(req: UserPinReq, admin: dict = Depends(require_admin)):
+def users_reset_pin(req: UserPinReq, request: Request, admin: dict = Depends(require_admin)):
     ok, msg = db.user_reset_pin(req.username, req.pin)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
+    db.audit(admin["username"], _client_ip(request), "user_reset_pin", req.username)
     return {"ok": True}
 
 
 @app.post("/users/disable")
-def users_disable(req: UserDisableReq, admin: dict = Depends(require_admin)):
+def users_disable(req: UserDisableReq, request: Request, admin: dict = Depends(require_admin)):
     if req.username == admin["username"] and req.disabled:
         raise HTTPException(status_code=400, detail="不能禁用自己")
     ok, msg = db.user_set_disabled(req.username, req.disabled)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
+    db.audit(admin["username"], _client_ip(request), "user_disable", f"{req.username}={'禁用' if req.disabled else '启用'}")
     return {"ok": True}
 
 
 @app.post("/users/delete")
-def users_delete(req: UserNameReq, admin: dict = Depends(require_admin)):
+def users_delete(req: UserNameReq, request: Request, admin: dict = Depends(require_admin)):
     if req.username == admin["username"]:
         raise HTTPException(status_code=400, detail="不能删除自己")
     if db.user_get(req.username) and db.user_get(req.username).get("role") == "admin" and db.admin_count() <= 1:
@@ -873,7 +907,24 @@ def users_delete(req: UserNameReq, admin: dict = Depends(require_admin)):
     ok, msg = db.user_delete(req.username)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
+    db.audit(admin["username"], _client_ip(request), "user_delete", req.username)
     return {"ok": True}
+
+
+# ── 管理员后台：审计日志 + 数据库查看 ────────────────────────────
+@app.get("/admin/audit")
+def admin_audit(limit: int = 200, username: str = "", action: str = "", admin: dict = Depends(require_admin)):
+    return {"audit": db.audit_list(limit, username, action)}
+
+
+@app.get("/admin/table")
+def admin_table(name: str, limit: int = 200, admin: dict = Depends(require_admin)):
+    return db.table_rows(name, limit)
+
+
+@app.get("/admin/stats")
+def admin_stats(admin: dict = Depends(require_admin)):
+    return {"stats": db.db_stats(), "db_enabled": db.enabled()}
 
 
 # ── 提示词修改（Gemini 重写 + 翻译，合为一个 prompt_edit 任务）─────────
