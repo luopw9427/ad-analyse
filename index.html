@@ -208,7 +208,9 @@
   .avatar:hover{filter:brightness(1.06);background:linear-gradient(135deg,#2f6bed,#5a52d8);color:#fff}
   .usermenu-pop{position:absolute;right:0;top:100%;margin-top:8px;min-width:180px;background:var(--panel);
     border:1px solid var(--line);border-radius:12px;box-shadow:var(--sh);padding:6px;display:none;z-index:60}
-  .usermenu:hover .usermenu-pop{display:block}
+  /* 透明桥接：盖住头像与菜单之间的 8px 空隙，鼠标穿过不断悬停 */
+  .usermenu-pop::before{content:"";position:absolute;left:0;right:0;top:-10px;height:10px;background:transparent}
+  .usermenu:hover .usermenu-pop,.usermenu-pop:hover{display:block}
   .um-head{padding:7px 10px 9px;border-bottom:1px solid var(--line);margin-bottom:4px;font-size:13px}
   .um-item{display:block;width:100%;text-align:left;background:transparent;border:0;box-shadow:none;padding:9px 10px;
     border-radius:8px;font-size:13px;color:var(--ink);cursor:pointer;font-weight:500}
