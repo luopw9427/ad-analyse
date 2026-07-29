@@ -1269,6 +1269,73 @@ def gen_result(job_id: int, user: dict = Depends(current_user)):
     raise HTTPException(status_code=404, detail="任务不存在")
 
 
+# ── 联动：在生成模块里查看/使用分析模块产出的提示词 ──────────────
+def _extract_prompts(reports: dict, show_pfx: str) -> list:
+    """从 /result 的 reports 里抽取可直接"送去生成"的提示词条目（仅中文）。"""
+    items = []
+    for k, v in reports.items():
+        rel = k[len(show_pfx):] if k.startswith(show_pfx) else k
+        parts = rel.split("/")
+        v = v or {}
+        if k.endswith("video_prompt.json") and len(parts) >= 3:
+            t = v.get("video_prompt_text")
+            if t:
+                items.append({"level": "video", "batch": parts[0], "ad": parts[1],
+                              "idx": None, "卖点": [], "text": t})
+        elif k.endswith("shot_prompts.json") and len(parts) >= 3:
+            for i, it in enumerate(v.get("镜头级prompt列表") or []):
+                if it.get("prompt"):
+                    items.append({"level": "shot", "batch": parts[0], "ad": parts[1],
+                                  "idx": it.get("序号", i + 1), "卖点": it.get("卖点", []),
+                                  "text": it["prompt"]})
+        elif k.endswith("共性镜头prompt.json") and len(parts) >= 2:
+            for i, it in enumerate(v.get("共性镜头prompt列表") or []):
+                if it.get("prompt"):
+                    items.append({"level": "common", "batch": parts[0], "ad": None,
+                                  "idx": i + 1, "卖点": it.get("卖点", []), "text": it["prompt"]})
+    return items
+
+
+@app.get("/gen/prompt_projects")
+def gen_prompt_projects(mine: int = 1, user: dict = Depends(current_user)):
+    """列出有分析产出的分组（供生成页选择来源）。mine=1 只看自己。"""
+    seen = {}
+    for j in db.recent(300):
+        if j.get("kind") != "analyze" or not j.get("ok"):
+            continue
+        owner = j.get("owner") or ""
+        if mine and owner != user["username"]:
+            continue
+        key = (owner, j.get("project_id"))
+        if key not in seen:
+            seen[key] = {"owner": owner, "project_id": j.get("project_id"),
+                         "batch": j.get("batch"), "created_at": j.get("created_at")}
+    return {"projects": list(seen.values())}
+
+
+@app.get("/gen/prompt_pick")
+def gen_prompt_pick(project_id: str, owner: str = "", user: dict = Depends(current_user)):
+    """读取某分组的分析产物，抽取视频级/镜头级/共性提示词，供生成页一键填入。"""
+    owner = (owner or "").strip() or user["username"]
+    epid = _epid(owner, project_id)
+    real_pfx = f"projects/{epid}/"
+    show_pfx = f"projects/{project_id}/"
+    keys = r2.list_keys(real_pfx)
+    if not keys:
+        return {"project_id": project_id, "owner": owner, "items": []}
+    WANT = ("video_prompt.json", "shot_prompts.json", "共性镜头prompt.json")
+    reports = {}
+    for k in keys:
+        if any(k.endswith(w) for w in WANT):
+            show_k = show_pfx + k[len(real_pfx):]
+            try:
+                reports[show_k] = r2.read_json(k)
+            except Exception:
+                pass
+    return {"project_id": project_id, "owner": owner,
+            "items": _extract_prompts(reports, show_pfx)}
+
+
 class CreditReq(BaseModel):
     username: str
     delta: int
