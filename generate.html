@@ -82,14 +82,26 @@
   .lab:first-of-type{margin-top:0}
   .req{color:#d64545}
 
-  /* 模型大框（图3 顶部那个）*/
-  .modelbox{display:flex;align-items:center;gap:12px;border:1px solid var(--line-2);border-radius:12px;
-    padding:12px 14px;background:var(--panel-2)}
-  .modelbox .mi{width:38px;height:38px;border-radius:10px;flex:0 0 38px;display:flex;align-items:center;justify-content:center;
+  /* 模型自定义下拉（图2 那种）*/
+  .mi{width:38px;height:38px;border-radius:10px;flex:0 0 38px;display:flex;align-items:center;justify-content:center;
     background:linear-gradient(135deg,#2f6bed,#8a5cf6);color:#fff}
-  .modelbox .mtxt{flex:1;min-width:0}
-  .modelbox select{border:0;background:transparent;box-shadow:none;padding:0;font-size:14px;font-weight:700;width:100%}
-  .modelbox .md{font-size:11px;color:var(--muted);margin-top:2px}
+  .mdd{position:relative}
+  .mdd-head{display:flex;align-items:center;gap:12px;border:1px solid var(--line-2);border-radius:12px;
+    padding:11px 14px;background:var(--panel-2);cursor:pointer;transition:.15s}
+  .mdd-head:hover{border-color:var(--accent)}
+  .mdd-name{flex:1;min-width:0;font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mdd-head .chev{color:var(--muted);transition:transform .2s}
+  .mdd.open .chev{transform:rotate(180deg)}
+  .mdd-pop{position:absolute;left:0;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--line);
+    border-radius:12px;box-shadow:var(--sh);padding:6px;z-index:30;display:none;max-height:320px;overflow:auto}
+  .mdd.open .mdd-pop{display:block}
+  .mdd-opt{display:flex;align-items:center;gap:11px;padding:8px 10px;border-radius:9px;cursor:pointer}
+  .mdd-opt:hover{background:var(--panel-2)}
+  .mdd-opt.on{background:var(--accent-weak)}
+  .mdd-opt .mi2{width:26px;height:26px;border-radius:7px;flex:0 0 26px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,#2f6bed,#8a5cf6);color:#fff}
+  .mdd-opt .nm{flex:1;font-size:13.5px;font-weight:600}
+  .mdd-opt .ck{color:var(--accent);opacity:0}.mdd-opt.on .ck{opacity:1}
 
   /* 版本卡（Normal / Fast）*/
   .vercards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -237,9 +249,13 @@
     <div class="notice" id="notice"></div>
 
     <div class="lab">模型</div>
-    <div class="modelbox">
-      <div class="mi"><svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="2.4" height="6" rx="1.2"/><rect x="7.4" y="6" width="2.4" height="12" rx="1.2"/><rect x="11.8" y="3.5" width="2.4" height="17" rx="1.2"/><rect x="16.2" y="7" width="2.4" height="10" rx="1.2"/><rect x="20.6" y="10" width="2.4" height="4" rx="1.2" opacity=".7"/></svg></div>
-      <div class="mtxt"><select id="family" onchange="onFamilyChange()"></select></div>
+    <div class="mdd" id="familyDD">
+      <div class="mdd-head" onclick="toggleFamilyDD(event)">
+        <div class="mi" id="famIcon"></div>
+        <div class="mdd-name" id="famName">—</div>
+        <svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+      <div class="mdd-pop" id="famPop"></div>
     </div>
 
     <div id="verWrap"><div class="lab">模型版本</div><div class="vercards" id="vercards"></div></div>
@@ -384,28 +400,48 @@ async function loadModels(){
     const n=$('#notice');n.style.display='block';n.textContent='⚠ 尚未配置 SEEDANCE_KEY，配置后即可生成。';}
   setMode(_mode);
 }
+// 品牌图标：同名（同系列）不同版本共用同一图标
+const SVG_WAVE='<svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="2.2" height="6" rx="1.1"/><rect x="7.2" y="6" width="2.2" height="12" rx="1.1"/><rect x="11.4" y="3.5" width="2.2" height="17" rx="1.1"/><rect x="15.6" y="7" width="2.2" height="10" rx="1.1"/><rect x="19.8" y="10" width="2.2" height="4" rx="1.1" opacity=".7"/></svg>';
+const SVG_STAR='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>';
+const SVG_IMG='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="m5 17 4-4 3 3 3-3 4 4"/></svg>';
+function brandIcon(name){const n=(name||'').toLowerCase();
+  if(n.includes('flux')||n.includes('图'))return SVG_IMG;
+  if(n.includes('wan')||n.includes('kling')||n.includes('veo'))return SVG_STAR;
+  return SVG_WAVE;}   // seedance 及默认 → 波形
+let _famIdx=0;
 function buildFamilies(){
   const list=MODELS.filter(m=>m.kind===_curType);
-  const map={};list.forEach(m=>{(map[m.family]=map[m.family]||{family:m.family,family_desc:m.family_desc,versions:[]}).versions.push(m);});
+  const map={};list.forEach(m=>{(map[m.family]=map[m.family]||{family:m.family,versions:[]}).versions.push(m);});
   _families=Object.values(map);
-  const sel=$('#family');sel.innerHTML='';
-  if(!_families.length){sel.innerHTML='<option>（暂无可用模型）</option>';$('#vercards').innerHTML='';return;}
-  _families.forEach((f,i)=>{const o=document.createElement('option');o.value=i;o.textContent=f.family;sel.appendChild(o);});
-  onFamilyChange();
+  const pop=$('#famPop');pop.innerHTML='';
+  if(!_families.length){$('#famName').textContent='（暂无可用模型）';$('#famIcon').innerHTML='';$('#vercards').innerHTML='';return;}
+  _families.forEach((f,i)=>{
+    const o=document.createElement('div');o.className='mdd-opt';
+    o.innerHTML='<div class="mi2">'+brandIcon(f.family)+'</div><span class="nm">'+esc(f.family)+'</span>'+
+      '<svg class="ck" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+    o.onclick=()=>{selectFamily(i);closeFamilyDD();};
+    pop.appendChild(o);
+  });
+  selectFamily(0);
 }
-const WAVE_ICON='<div class="vi"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="2.2" height="6" rx="1.1"/><rect x="7.2" y="6" width="2.2" height="12" rx="1.1"/><rect x="11.4" y="3.5" width="2.2" height="17" rx="1.1"/><rect x="15.6" y="7" width="2.2" height="10" rx="1.1"/><rect x="19.8" y="10" width="2.2" height="4" rx="1.1" opacity=".7"/></svg></div>';
-function onFamilyChange(){
-  const f=_families[+$('#family').value]||_families[0];if(!f)return;
+function selectFamily(i){
+  _famIdx=i;const f=_families[i];if(!f)return;
+  $('#famName').textContent=f.family;$('#famIcon').innerHTML=brandIcon(f.family);
+  $('#famPop').querySelectorAll('.mdd-opt').forEach((el,k)=>el.classList.toggle('on',k===i));
+  const icon=brandIcon(f.family);
   const wrap=$('#verWrap'),vc=$('#vercards');vc.innerHTML='';
   wrap.style.display=f.versions.length>1?'':'none';   // 单版本则隐藏版本卡
-  f.versions.forEach((m,i)=>{
-    const c=document.createElement('div');c.className='vercard'+(i===0?' on':'');
-    c.innerHTML='<span class="rd"></span>'+WAVE_ICON+'<b>'+esc(m.version||m.label)+'</b>';
+  f.versions.forEach((m,k)=>{
+    const c=document.createElement('div');c.className='vercard'+(k===0?' on':'');
+    c.innerHTML='<span class="rd"></span><div class="vi">'+icon+'</div><b>'+esc(m.version||m.label)+'</b>';
     c.onclick=()=>{vc.querySelectorAll('.vercard').forEach(x=>x.classList.remove('on'));c.classList.add('on');selectModel(m.id);};
     vc.appendChild(c);
   });
   selectModel(f.versions[0].id);
 }
+function toggleFamilyDD(e){if(e)e.stopPropagation();$('#familyDD').classList.toggle('open');}
+function closeFamilyDD(){$('#familyDD').classList.remove('open');}
+document.addEventListener('click',e=>{if(!e.target.closest('#familyDD'))closeFamilyDD();});
 function curModel(){return MODELS.find(m=>m.id===_modelId)}
 function selectModel(id){_modelId=id;buildParams();}
 function bg(container,arr,cur,onPick,fmt){
