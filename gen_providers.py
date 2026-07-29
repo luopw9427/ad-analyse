@@ -178,9 +178,11 @@ def estimate_usd(model: str, params: dict) -> float:
 
 
 # ── 统一入口 ─────────────────────────────────────────────────────
-def generate(model: str, prompt: str, params: dict, ref_image_url: str = "") -> list:
+def generate(model: str, prompt: str, params: dict, ref_image_urls=None) -> list:
     """发起一次生成，阻塞直到完成，返回 [{"url":..,"kind":"video|image"}]。
+    ref_image_urls：参考图 URL 列表（首帧 + 其它参考图，最多 4 张）。
     失败抛 ProviderError；未配置抛 ProviderNotConfigured。"""
+    refs = [u for u in (ref_image_urls or []) if u]
     m = MODEL_CATALOG.get(model)
     if not m:
         raise ProviderError(f"未知模型：{model}")
@@ -188,11 +190,11 @@ def generate(model: str, prompt: str, params: dict, ref_image_url: str = "") -> 
     if not _provider_configured(prov):
         raise ProviderNotConfigured(f"服务 {prov} 未配置 API key，请在 Railway 变量里填写后重试")
     if prov == "seedance":
-        return _seedance_generate(m, prompt, params, ref_image_url)
+        return _seedance_generate(m, prompt, params, refs)
     if prov == "fal":
-        return _fal_generate(m, prompt, params, ref_image_url)
+        return _fal_generate(m, prompt, params, refs)
     if prov == "replicate":
-        return _replicate_generate(m, prompt, params, ref_image_url)
+        return _replicate_generate(m, prompt, params, refs)
     raise ProviderError(f"不支持的 provider：{prov}")
 
 
@@ -203,18 +205,20 @@ def _seedance_headers() -> dict:
     return {"Authorization": f"Bearer {SEEDANCE_KEY}", "Content-Type": "application/json"}
 
 
-def _seedance_generate(m: dict, prompt: str, params: dict, ref_image_url: str = "") -> list:
-    body = {
-        "prompt": prompt,
-        "model": m["seedance_model"],
-        "duration": int(params.get("duration") or (m.get("durations") or [5])[0]),
-    }
+def _seedance_generate(m: dict, prompt: str, params: dict, ref_image_urls=None) -> list:
+    # 严格按 seedanceapi.org v2 手册：prompt/model/duration 必填；resolution 可选；
+    # 文生视频用 aspect_ratio；图生视频用 images[]（1–4 张，首张=首帧）。
+    refs = [u for u in (ref_image_urls or []) if u][:4]
+    dur = int(params.get("duration") or (m.get("durations") or [5])[0])
+    if dur not in (m.get("durations") or [dur]):
+        dur = (m.get("durations") or [5])[0]        # 兜底到合法时长
+    body = {"prompt": prompt, "model": m["seedance_model"], "duration": dur}
     if params.get("resolution"):
         body["resolution"] = params["resolution"]
-    if ref_image_url:
-        body["images"] = [ref_image_url]          # 图生视频
+    if refs:
+        body["images"] = refs                        # 图生视频（含多参考图）
     elif params.get("aspect"):
-        body["aspect_ratio"] = params["aspect"]   # 文生视频才需画幅
+        body["aspect_ratio"] = params["aspect"]      # 文生视频才需画幅
 
     try:
         r = requests.post(f"{SEEDANCE_BASE}/generate", headers=_seedance_headers(),
@@ -266,7 +270,8 @@ def _fal_headers() -> dict:
     return {"Authorization": f"Key {FAL_KEY}", "Content-Type": "application/json"}
 
 
-def _fal_generate(m: dict, prompt: str, params: dict, ref_image_url: str = "") -> list:
+def _fal_generate(m: dict, prompt: str, params: dict, ref_image_urls=None) -> list:
+    ref = ([u for u in (ref_image_urls or []) if u] or [""])[0]
     endpoint = m["endpoint"]
     body = {"prompt": prompt}
     if m["kind"] == "image":
@@ -275,8 +280,8 @@ def _fal_generate(m: dict, prompt: str, params: dict, ref_image_url: str = "") -
         n = int(params.get("num", 1) or 1)
         if n > 1:
             body["num_images"] = n
-        if ref_image_url:
-            body["image_url"] = ref_image_url
+        if ref:
+            body["image_url"] = ref
     try:
         r = requests.post(f"{_FAL_BASE}/{endpoint}", headers=_fal_headers(), json=body, timeout=60)
     except Exception as e:
@@ -320,12 +325,13 @@ def _fal_parse_outputs(result: dict) -> list:
 
 
 # ── Replicate 实现（预留）───────────────────────────────────────
-def _replicate_generate(m: dict, prompt: str, params: dict, ref_image_url: str = "") -> list:
+def _replicate_generate(m: dict, prompt: str, params: dict, ref_image_urls=None) -> list:
+    ref = ([u for u in (ref_image_urls or []) if u] or [""])[0]
     headers = {"Authorization": f"Bearer {REPLICATE_API_TOKEN}",
                "Content-Type": "application/json", "Prefer": "wait"}
     inp = {"prompt": prompt}
-    if ref_image_url:
-        inp["image"] = ref_image_url
+    if ref:
+        inp["image"] = ref
     url = f"https://api.replicate.com/v1/models/{m['replicate_model']}/predictions"
     r = requests.post(url, headers=headers, json={"input": inp}, timeout=120)
     if r.status_code >= 400:

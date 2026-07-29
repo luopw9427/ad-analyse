@@ -1168,7 +1168,8 @@ class GenReq(BaseModel):
     prompt: str
     project_id: Optional[str] = "生成"     # 归属分组（复用多租户命名空间）
     params: Optional[dict] = None          # {duration,resolution,aspect,audio,num,...}
-    ref_image_url: Optional[str] = None    # 参考图/首帧（图生视频/垫图）
+    ref_image_url: Optional[str] = None    # 单张参考图（兼容旧字段）
+    ref_image_urls: Optional[list] = None  # 参考图列表：首帧 + 其它参考图（最多 4 张）
     source: Optional[str] = None           # 来源标记（如"来自分析:批次#序号"）
     prompt_versions: Optional[list] = None # 提示词版本链 [{v,kind,instruction,text,at}]
     parent_id: Optional[int] = None        # 从某任务"改词重生成"→ 链到父任务
@@ -1210,15 +1211,16 @@ def gen_status(user: dict = Depends(current_user)):
 
 def _run_gen_bg(job_id, owner: str, project_id: str, batch: str,
                 gtype: str, model: str, prompt: str, params: dict,
-                ref_image_url: str, est_usd: float, credits_charged: int,
+                ref_image_urls, est_usd: float, credits_charged: int,
                 prompt_versions=None, series_id: str = "", parent_id=None, ver: int = 1):
     """后台执行生成：调 provider → 下载产物 → 转存 R2 → 写 meta（含提示词版本链/谱系）→ 结算。"""
     import requests as _rq
     t0 = time.time()
+    refs = [u for u in (ref_image_urls or []) if u]
     epid = _epid(owner, project_id)
     prefix = f"gen/{epid}/{batch}/"
     try:
-        outs = gen.generate(model, prompt, params or {}, ref_image_url or "")
+        outs = gen.generate(model, prompt, params or {}, refs)
         items = []
         for i, o in enumerate(outs):
             url = o["url"]; okind = o.get("kind", gtype)
@@ -1233,7 +1235,7 @@ def _run_gen_bg(job_id, owner: str, project_id: str, batch: str,
             items.append({"kind": okind, "key": key, "url": pub})
         meta = {
             "type": gtype, "model": model, "prompt": prompt, "params": params or {},
-            "ref_image_url": ref_image_url or "", "owner": owner,
+            "ref_image_url": (refs[0] if refs else ""), "ref_image_urls": refs, "owner": owner,
             "project_id": project_id, "batch": batch, "items": items,
             "est_usd": est_usd, "credits": credits_charged,
             "prompt_versions": prompt_versions or [],   # 提示词优化版本链（含每版优化要求与文本）
@@ -1270,7 +1272,8 @@ def gen_create(req: GenReq, user: dict = Depends(current_user)):
         raise HTTPException(status_code=400, detail=f"未知模型：{req.model}")
     if m["kind"] != req.type:
         raise HTTPException(status_code=400, detail="模型与生成类型不匹配")
-    if not (req.prompt or "").strip() and not req.ref_image_url:
+    refs = [u for u in (req.ref_image_urls or ([req.ref_image_url] if req.ref_image_url else [])) if u][:4]
+    if not (req.prompt or "").strip() and not refs:
         raise HTTPException(status_code=400, detail="请填写提示词或提供参考图")
 
     params = req.params or {}
@@ -1307,12 +1310,36 @@ def gen_create(req: GenReq, user: dict = Depends(current_user)):
 
     threading.Thread(target=_run_gen_bg,
                      args=(job_id, owner, project_id, batch, req.type, req.model,
-                           req.prompt or "", params, req.ref_image_url or "",
+                           req.prompt or "", params, refs,
                            est_usd, credits_charged, req.prompt_versions or [],
                            series_id, parent_id, ver),
                      daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id, "batch": batch,
             "series_id": series_id, "ver": ver, "est_usd": est_usd, "est_credits": need}
+
+
+@app.post("/gen/upload_image")
+async def gen_upload_image(file: UploadFile = File(...), user: dict = Depends(current_user)):
+    """上传参考图（本地文件 / 拖入的图片）到 R2，返回公网直链，供生成模型作首帧/参考图。"""
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="空文件")
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="图片过大（上限 10MB）")
+    ct = file.content_type or ""
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
+           "image/gif": ".gif"}.get(ct)
+    if not ext:
+        name = (file.filename or "").lower()
+        for e in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+            if name.endswith(e):
+                ext = ".jpg" if e == ".jpeg" else e; break
+    if not ext:
+        raise HTTPException(status_code=400, detail="仅支持 PNG/JPG/WEBP/GIF 图片")
+    import uuid as _uuid
+    key = f"gen_uploads/{user['username']}/{_uuid.uuid4().hex}{ext}"
+    url = r2.upload_bytes(key, data, ct or "image/jpeg")
+    return {"ok": True, "url": url, "key": key}
 
 
 @app.get("/gen/list")

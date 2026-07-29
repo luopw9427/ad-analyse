@@ -122,6 +122,21 @@
   .bopt:hover{border-color:var(--accent);color:var(--accent)}
   .bopt.on{background:var(--accent);border-color:var(--accent);color:#fff}
 
+  /* 参考图上传区 */
+  .refzone{border:1px dashed var(--line-2);border-radius:11px;padding:12px;transition:.15s}
+  .refzone.drag{border-color:var(--accent);background:var(--accent-weak)}
+  .refgrid{display:flex;gap:8px;flex-wrap:wrap}
+  .refgrid:empty{display:none}
+  .refthumb{position:relative;width:66px;height:66px;border-radius:9px;overflow:hidden;border:1px solid var(--line-2);background:#0c1222}
+  .refthumb img{width:100%;height:100%;object-fit:cover}
+  .refthumb .rm{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;
+    border:0;display:flex;align-items:center;justify-content:center;font-size:12px;cursor:pointer;padding:0;box-shadow:none}
+  .refthumb .first{position:absolute;bottom:0;left:0;right:0;background:rgba(47,107,237,.85);color:#fff;font-size:9px;text-align:center;padding:1px 0}
+  .refthumb.up{display:flex;align-items:center;justify-content:center;color:#6b7796;font-size:11px}
+  .refadd{display:flex;align-items:center;gap:8px;justify-content:center;color:var(--sub);font-size:12px;font-weight:600;
+    padding:12px;margin-top:8px;border:1px solid var(--line-2);border-radius:9px;cursor:pointer;transition:.15s}
+  .refgrid:empty + .refadd{margin-top:0}
+  .refadd:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-weak)}
   .ptools{display:flex;gap:8px}.ptools button{padding:5px 10px;font-size:12px}
   .srcbar{display:none;align-items:center;gap:8px;background:var(--sell-bg);color:var(--sell);
     border-radius:9px;padding:7px 10px;font-size:12px;margin-bottom:8px}
@@ -185,8 +200,17 @@
     transition:transform .24s ease;display:flex;flex-direction:column;max-width:94vw}
   #pick{width:var(--pick-w)} #detail{width:var(--dt-w)}
   body.pick-open #pick{transform:translateX(0)} body.detail-open #detail{transform:translateX(0)}
+  .dr-grip{position:absolute;left:0;top:0;width:7px;height:100%;cursor:ew-resize;z-index:3}
+  .dr-grip:hover{background:var(--accent-weak)}
   .dr-hd{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .dr-hd b{font-size:14px}.dr-bd{flex:1;overflow-y:auto;padding:14px 16px}
+  /* 使用分析结果：任务级树形 + 缩进 */
+  .tk{border:1px solid var(--line);border-radius:11px;margin-bottom:12px;overflow:hidden}
+  .tk>summary{list-style:none;cursor:pointer;padding:10px 12px;background:var(--panel-2);font-weight:700;font-size:12.5px;display:flex;align-items:center;gap:8px}
+  .tk>summary::-webkit-details-marker{display:none}
+  .tk>summary .tw{margin-left:auto;font-size:11px;color:var(--muted);font-weight:600}
+  .tk .adg{border-left:2px solid var(--line-2);margin:8px 0 8px 14px;padding-left:10px}
+  .tk .adg>.ah{font-size:12px;color:var(--sell);font-weight:700;margin:6px 0}
   .dr-x{margin-left:auto;cursor:pointer;font-weight:700;color:var(--muted)}
   .sec{margin-bottom:16px}.sec>.h{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
   .box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel-2);font-size:13px;line-height:1.6}
@@ -281,8 +305,17 @@
     <div class="verbar" id="verbar"><span id="verTxt"></span><span class="lnk" onclick="toggleVList()">查看版本</span></div>
     <div class="vlist" id="vlist"></div>
 
-    <div class="lab" id="refLab">参考图 / 首帧 URL <span class="muted" style="font-weight:400">（可选，填了即图生视频）</span></div>
-    <input id="refimg" placeholder="https://…/xxx.jpg" style="width:100%">
+    <div class="lab" id="refLab">参考图 / 首帧 <span class="muted" style="font-weight:400">（可选，最多 4 张，第 1 张为首帧）</span></div>
+    <div class="refzone" id="refzone">
+      <div class="refgrid" id="refgrid"></div>
+      <div class="refadd" id="refadd" onclick="pickRefFile()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/></svg>
+        <span>点击上传 · 拖入本地/网页图片 · 或粘贴 URL</span>
+      </div>
+      <input id="refurl" placeholder="粘贴图片 URL，回车添加" style="width:100%;margin-top:8px"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();addRefUrl();}">
+      <input type="file" id="reffile" accept="image/*" multiple style="display:none" onchange="onRefFiles(event)">
+    </div>
 
     <div id="durWrap"><div class="lab">时长（秒）</div><div class="bgroup" id="durGroup"></div></div>
     <div class="lab">分辨率</div><div class="bgroup" id="resGroup"></div>
@@ -331,6 +364,7 @@
 
 <!-- 使用分析结果抽屉 -->
 <div id="pick" class="drawer">
+  <div class="dr-grip" onmousedown="startDrawerResize(event,'pick')"></div>
   <div class="dr-hd">
     <b>使用分析结果</b>
     <div class="bi-tabs" id="pickScope"><button class="on" onclick="setPickScope(1)">个人</button><button onclick="setPickScope(0)">全体</button></div>
@@ -342,6 +376,7 @@
 
 <!-- 结果详情抽屉 -->
 <div id="detail" class="drawer">
+  <div class="dr-grip" onmousedown="startDrawerResize(event,'detail')"></div>
   <div class="dr-hd"><b id="dtTitle">任务详情</b><span class="dr-x" onclick="closeDetail()">✕</span></div>
   <div class="dr-bd" id="detailBody"></div>
 </div>
@@ -391,7 +426,7 @@ function setMode(mode){
   if(location.hash!=='#'+mode)history.replaceState(null,'','/studio#'+mode);
   $('#modeChip').textContent=MODE_NAME[mode];
   document.querySelectorAll('#rail .rail-sub').forEach(a=>a.classList.toggle('active',a.getAttribute('data-mode')===mode));
-  $('#refLab').innerHTML='参考图 / 首帧 URL <span class="muted" style="font-weight:400">（可选，填了即图生'+(mode==='image'?'图':'视频')+'）</span>';
+  $('#refLab').innerHTML='参考图 / 首帧 <span class="muted" style="font-weight:400">（可选，最多 4 张，第 1 张为首帧；填了即图生'+(mode==='image'?'图':'视频')+'）</span>';
   buildFamilies();
 }
 
@@ -515,12 +550,13 @@ async function doOptimize(){
 async function doGenerate(){
   const m=curModel();if(!m){alert('请选择模型');return;}
   if(!m.configured){alert('该模型未配置 API key，暂不能生成');return;}
-  const promptText=$('#prompt').value.trim();const ref=$('#refimg').value.trim();
-  if(!promptText&&!ref){alert('请填写提示词或参考图');return;}
+  const promptText=$('#prompt').value.trim();const refs=_refs.map(r=>r.url).filter(Boolean);
+  if(_refs.some(r=>r.uploading)){alert('有参考图还在上传，请稍候');return;}
+  if(!promptText&&!refs.length){alert('请填写提示词或参考图');return;}
   if(promptText&&(!_pv.length||_pv[_pv.length-1].text!==promptText))_pv.push({v:_pv.length+1,kind:'manual',instruction:'',text:promptText,at:new Date().toISOString()});
   $('#btnGen').disabled=true;$('#genHint').textContent='提交中…';
   try{const body={type:_curType,model:m.id,prompt:promptText,project_id:$('#project').value.trim()||'生成',
-      params:gatherParams(),ref_image_url:ref||null,prompt_versions:_pv,parent_id:_parentId};
+      params:gatherParams(),ref_image_urls:refs,prompt_versions:_pv,parent_id:_parentId};
     const r=await fetch('/gen/create',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
     const d=await r.json().catch(()=>({}));
     if(!r.ok){$('#genHint').textContent='';alert((d&&d.detail)||'提交失败');$('#btnGen').disabled=false;return;}
@@ -590,7 +626,8 @@ async function regen(id){
   try{const d=await (await fetch('/gen/result?job_id='+id,{headers:headers()})).json();const meta=d.meta||{};
     _pv=[];_parentId=id;setMode(meta.type==='image'?'image':'video');
     $('#prompt').value=meta.prompt||'';updCC();_pv.push({v:1,kind:'manual',instruction:'',text:meta.prompt||'',at:new Date().toISOString()});renderVerbar();
-    if(meta.ref_image_url)$('#refimg').value=meta.ref_image_url;if(meta.project_id)$('#project').value=meta.project_id;
+    _refs=((meta.ref_image_urls&&meta.ref_image_urls.length)?meta.ref_image_urls:(meta.ref_image_url?[meta.ref_image_url]:[])).map(u=>({url:u}));renderRefs();
+    if(meta.project_id)$('#project').value=meta.project_id;
     $('#parentTxt').textContent='改词重生成自：编号 '+(d.series_id||'')+' · v'+(d.ver||1);$('#parentbar').classList.add('on');
     closeDetail();$('#prompt').focus();
   }catch(e){alert('载入失败：'+e);}
@@ -616,11 +653,27 @@ async function loadPickItems(){const i=$('#pickProject').value;if(i==='')return;
   try{const r=await fetch('/gen/prompt_pick?project_id='+encodeURIComponent(p.project_id)+'&owner='+encodeURIComponent(p.owner||''),{headers:headers()});
     const d=await r.json();renderPickItems(d.items||[]);}catch(e){$('#pickBody').innerHTML='<div class="muted">加载失败。</div>';}
 }
+// 任务级树形：批次(任务) › 广告 › 提示词，逐级缩进代表归属
 function renderPickItems(items){const bd=$('#pickBody');
   if(!items.length){bd.innerHTML='<div class="muted">该分组没有可用的提示词产物。</div>';return;}
-  const groups={};items.forEach(it=>{const g=it.batch||'-';(groups[g]=groups[g]||[]).push(it);});
-  bd.innerHTML='';Object.keys(groups).forEach(g=>{const gd=document.createElement('div');gd.className='pgroup';gd.innerHTML='<div class="h">批次 '+esc(g)+'</div>';
-    groups[g].forEach(it=>gd.appendChild(pickItemNode(it)));bd.appendChild(gd);});
+  const byBatch={};items.forEach(it=>{(byBatch[it.batch||'-']=byBatch[it.batch||'-']||[]).push(it);});
+  bd.innerHTML='';
+  Object.keys(byBatch).forEach((b,bi)=>{
+    const arr=byBatch[b];
+    const tk=document.createElement('details');tk.className='tk';tk.open=bi===0;
+    const sm=document.createElement('summary');
+    sm.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>任务 '+esc(b)+'<span class="tw">'+arr.length+' 条提示词</span>';
+    tk.appendChild(sm);
+    // 按广告分组
+    const byAd={};arr.forEach(it=>{const k=(it.level==='common')?'__共性__':(it.ad||'-');(byAd[k]=byAd[k]||[]).push(it);});
+    Object.keys(byAd).forEach(ad=>{
+      const adg=document.createElement('div');adg.className='adg';
+      adg.innerHTML='<div class="ah">'+(ad==='__共性__'?'品类共性镜头':('广告：'+esc(ad)))+'</div>';
+      byAd[ad].forEach(it=>adg.appendChild(pickItemNode(it)));
+      tk.appendChild(adg);
+    });
+    bd.appendChild(tk);
+  });
 }
 function pickItemNode(it){const lv={video:['视频级','lv-video'],shot:['镜头 '+(it.idx||''),'lv-shot'],common:['共性','lv-common']}[it.level]||['',''];
   const el=document.createElement('div');el.className='pitem';const adline=it.ad?('<span class="muted" style="font-size:11px">'+esc(it.ad)+'</span>'):'';
@@ -638,10 +691,60 @@ function prefill(){try{const q=new URLSearchParams(location.search);let pf=null;
     if(raw){pf=JSON.parse(raw);localStorage.removeItem('genPrefill');}
     const p=q.get('prompt')||(pf&&pf.prompt);const ref=q.get('ref')||(pf&&pf.ref);
     if(p){_pv=[];setPromptVersion(p,'source',(pf&&pf.src)||'分析结果');if(pf&&pf.src){$('#srcTxt').textContent='来源：'+pf.src;$('#srcbar').classList.add('on');}}
-    if(ref)$('#refimg').value=ref;
+    if(ref){_refs=[{url:ref}];renderRefs();}
   }catch(e){}}
 
+// ── 参考图：点击上传 / 拖入(本地文件·网页图片) / 粘贴 URL，最多 4 张 ──
+let _refs=[];   // [{url, uploading?}]
+function renderRefs(){
+  const g=$('#refgrid');g.innerHTML='';
+  _refs.forEach((r,i)=>{
+    const t=document.createElement('div');t.className='refthumb'+(r.uploading?' up':'');
+    t.innerHTML=r.uploading?'上传中…':('<img src="'+esc(r.url)+'">'+(i===0?'<span class="first">首帧</span>':'')+'<button class="rm" onclick="removeRef('+i+')">✕</button>');
+    g.appendChild(t);
+  });
+  const canAdd=_refs.length<4;
+  $('#refadd').style.display=canAdd?'':'none';$('#refurl').style.display=canAdd?'':'none';
+}
+function removeRef(i){_refs.splice(i,1);renderRefs();}
+function pickRefFile(){$('#reffile').click();}
+function onRefFiles(e){[...(e.target.files||[])].forEach(f=>{if(f.type.startsWith('image/'))uploadRef(f);});e.target.value='';}
+async function uploadRef(file){
+  if(_refs.length>=4){alert('最多 4 张参考图');return;}
+  const slot={url:'',uploading:true};_refs.push(slot);renderRefs();
+  try{const fd=new FormData();fd.append('file',file);
+    const r=await fetch('/gen/upload_image',{method:'POST',headers:headers(),body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok||!d.url){_refs=_refs.filter(x=>x!==slot);alert((d&&d.detail)||'上传失败');}
+    else{slot.url=d.url;slot.uploading=false;}
+  }catch(e){_refs=_refs.filter(x=>x!==slot);alert('上传失败：'+e);}
+  renderRefs();
+}
+function addRefUrlVal(url){url=(url||'').trim();if(!url)return;if(_refs.length>=4){alert('最多 4 张参考图');return;}_refs.push({url});renderRefs();}
+function addRefUrl(){const el=$('#refurl');addRefUrlVal(el.value);el.value='';}
+function wireRefzone(){
+  const z=$('#refzone');
+  ['dragenter','dragover'].forEach(ev=>z.addEventListener(ev,e=>{e.preventDefault();z.classList.add('drag');}));
+  ['dragleave','drop'].forEach(ev=>z.addEventListener(ev,e=>{if(ev==='dragleave'&&z.contains(e.relatedTarget))return;z.classList.remove('drag');}));
+  z.addEventListener('drop',e=>{e.preventDefault();const dt=e.dataTransfer;if(!dt)return;
+    if(dt.files&&dt.files.length){[...dt.files].forEach(f=>{if(f.type.startsWith('image/'))uploadRef(f);});return;}
+    let url=dt.getData('text/uri-list')||dt.getData('text/plain');
+    if(!url){const html=dt.getData('text/html');const m=html&&html.match(/<img[^>]+src=["']([^"']+)/i);if(m)url=m[1];}
+    if(url)addRefUrlVal(url.split('\n')[0].trim());
+  });
+}
+
+// ── 抽屉宽度可拖拽 ──
+function startDrawerResize(e,which){e.preventDefault();
+  const varName=which==='pick'?'--pick-w':'--dt-w';document.body.style.userSelect='none';
+  function mv(ev){let w=window.innerWidth-ev.clientX;w=Math.max(320,Math.min(w,window.innerWidth*0.9));
+    document.documentElement.style.setProperty(varName,w+'px');}
+  function up(){window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);document.body.style.userSelect='';}
+  window.addEventListener('mousemove',mv);window.addEventListener('mouseup',up);
+}
+
 initRail();measureHdr();window.addEventListener('resize',measureHdr);
+wireRefzone();
 boot();
 </script>
 </body>
