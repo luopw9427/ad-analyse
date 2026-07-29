@@ -12,7 +12,7 @@
     --accent:#2f6bed; --accent-ink:#1e51c4; --accent-weak:#eaf1fe;
     --ok:#15a34a; --ok-bg:#e9f7ee; --warn:#c26a12; --warn-bg:#fbf1e2;
     --run:#5a52d8; --run-bg:#eeecfb; --sell:#0e7490; --sell-bg:#e0f2f7;
-    --r:14px; --r-sm:9px; --rail-w:56px; --pick-w:400px;
+    --r:14px; --r-sm:9px; --rail-w:56px; --pick-w:400px; --panel-w:410px;
     --sh:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.05);
     --sh-sm:0 1px 2px rgba(16,24,40,.05);
   }
@@ -39,7 +39,7 @@
   .rail-brand{color:#5f6b85;font-size:11px;text-align:center;padding:6px 0;white-space:nowrap;opacity:0}
   body.rail-open .rail-brand{opacity:1}
 
-  header{padding:14px 28px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+  header{padding:12px 24px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
     border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;
     position:fixed;top:0;left:var(--rail-w);right:0;z-index:40;transition:left .2s ease}
   header h1{font-size:16px;margin:0 8px 0 0;font-weight:700;
@@ -50,30 +50,50 @@
 
   input,select,textarea{background:#fff;border:1px solid var(--line-2);color:var(--ink);
     padding:8px 11px;border-radius:var(--r-sm);font-size:13px;outline:none;transition:.15s;font-family:inherit}
-  textarea{width:100%;min-height:104px;resize:vertical;line-height:1.65}
+  textarea{width:100%;min-height:150px;resize:vertical;line-height:1.65}
   input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
   button{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:8px 16px;border-radius:var(--r-sm);
     cursor:pointer;font-size:13px;font-weight:600;transition:.15s;box-shadow:var(--sh-sm)}
   button:hover{background:var(--accent-weak);color:var(--accent);border-color:var(--accent)}
   button:disabled{opacity:.5;cursor:not-allowed}
-  button.primary{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff;border:0;padding:10px 24px}
+  button.primary{width:100%;background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff;border:0;padding:13px;font-size:14px}
   button.primary:hover{filter:brightness(1.05)}
   button.soft{background:var(--accent-weak);color:var(--accent-ink);border-color:transparent}
 
-  #scroll{position:fixed;left:var(--rail-w);right:0;top:var(--hdr-h,58px);bottom:0;overflow-y:auto;transition:left .2s ease,right .24s ease}
-  body.pick-open #scroll{right:calc(var(--pick-w) + 8px)}
-  main{max-width:1100px;margin:0 auto;padding:22px}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:18px;box-shadow:var(--sh)}
-  .card h2{font-size:15px;margin:0 0 14px}
-  .seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line-2);border-radius:999px;padding:3px}
-  .seg button{background:transparent;border:0;box-shadow:none;border-radius:999px;padding:7px 18px}
+  /* 两栏工作区：左=生成面板，右=结果任务 */
+  #scroll{position:fixed;left:var(--rail-w);right:0;top:var(--hdr-h,56px);bottom:0;transition:left .2s ease}
+  .studio{display:flex;height:100%}
+  .gen-panel{flex:0 0 var(--panel-w);width:var(--panel-w);overflow-y:auto;background:var(--panel);
+    border-right:1px solid var(--line);padding:18px 20px 40px}
+  .gen-panel h3{font-size:13px;color:var(--sub);margin:16px 0 8px;font-weight:700}
+  .gen-panel h3:first-child{margin-top:0}
+  .results{flex:1;overflow-y:auto;padding:16px 22px 40px;transition:margin-right .24s ease}
+  body.pick-open .results{margin-right:calc(var(--pick-w) + 4px)}
+  .res-hd{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .res-hd .ttl{font-size:15px;font-weight:700}
+
+  .seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line-2);border-radius:999px;padding:3px;width:100%}
+  .seg button{flex:1;background:transparent;border:0;box-shadow:none;border-radius:999px;padding:8px 0}
   .seg button.on{background:#fff;color:var(--accent);box-shadow:var(--sh-sm)}
-  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
-  .row label{font-size:12px;color:var(--sub);font-weight:600}
-  .srcbar{display:none;align-items:center;gap:10px;background:var(--sell-bg);color:var(--sell);
-    border-radius:10px;padding:8px 12px;font-size:12px;margin-bottom:10px}
+  .ver{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .verbox{border:1px solid var(--line-2);border-radius:12px;padding:12px;cursor:pointer;transition:.15s}
+  .verbox:hover{border-color:var(--accent)}
+  .verbox.on{border-color:var(--accent);background:var(--accent-weak)}
+  .verbox b{display:block;font-size:13px}
+  .verbox small{color:var(--muted);font-size:11px}
+  .field{margin-bottom:12px}
+  .field>label{font-size:12px;color:var(--sub);font-weight:600;display:block;margin-bottom:5px}
+  .prow{display:flex;gap:8px;flex-wrap:wrap}
+  .prow .pcell{flex:1;min-width:96px}
+  .prow .pcell label{font-size:11px;color:var(--muted);display:block;margin-bottom:3px}
+  .prow select{width:100%}
+  .srcbar{display:none;align-items:center;gap:8px;background:var(--sell-bg);color:var(--sell);
+    border-radius:9px;padding:7px 10px;font-size:12px;margin-bottom:10px}
   .srcbar.on{display:flex}
   .srcbar .x{margin-left:auto;cursor:pointer;font-weight:700}
+  .credits{display:flex;align-items:center;gap:8px;margin:14px 0 10px;font-size:13px;color:var(--sub)}
+  .credits b{color:var(--ink)}
+
   .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2f6bed,#5a52d8);color:#fff;
     border:0;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
   .usermenu{position:relative}
@@ -85,16 +105,26 @@
   .um-item:hover{background:var(--accent-weak)}
   .um-head{padding:6px 12px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
 
-  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+  /* 图标按钮：默认只显图标，hover / 选中才展开中文 */
+  .iconbtn{display:inline-flex;align-items:center;border:1px solid var(--line-2);background:#fff;
+    border-radius:999px;padding:7px 8px;cursor:pointer;overflow:hidden;transition:.18s;color:var(--sub);box-shadow:var(--sh-sm)}
+  .iconbtn svg{flex:0 0 18px}
+  .iconbtn .lbl{max-width:0;opacity:0;white-space:nowrap;transition:.18s;font-size:12px;font-weight:600}
+  .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
+  .iconbtn:hover .lbl,.iconbtn.on .lbl{max-width:48px;opacity:1;margin-left:6px}
+  .iconbtn.on{background:var(--accent-weak);border-color:var(--accent);color:var(--accent-ink)}
+
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
   .g-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh-sm)}
   .g-media{width:100%;aspect-ratio:16/10;background:#0c1222;display:flex;align-items:center;justify-content:center;color:#6b7796;font-size:12px;text-align:center;padding:6px}
   .g-media video,.g-media img{width:100%;height:100%;object-fit:cover}
   .g-body{padding:11px 13px}
   .g-body .p{font-size:12px;color:var(--sub);max-height:52px;overflow:hidden;line-height:1.5}
-  .g-meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--muted)}
+  .g-meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--muted);gap:6px}
+  .g-owner{display:inline-flex;align-items:center;gap:4px}
   .badge{font-size:11px;padding:2px 9px;border-radius:999px;font-weight:600}
   .b-run{background:var(--run-bg);color:var(--run)} .b-ok{background:var(--ok-bg);color:var(--ok)} .b-err{background:var(--warn-bg);color:var(--warn)}
-  .notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;display:none}
+  .notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 12px;font-size:12px;margin-bottom:12px;display:none}
 
   /* 提示词选取抽屉 */
   #pick{position:fixed;top:0;right:0;bottom:0;width:var(--pick-w);max-width:92vw;z-index:45;background:var(--panel);
@@ -119,12 +149,12 @@
   <button class="rail-toggle" onclick="toggleRail()" title="展开/收起">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
   </button>
-  <a class="rail-item" data-path="/" href="/" title="视频广告分析">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
-    <span>视频广告分析</span>
+  <a class="rail-item" data-path="/" href="/" title="广告分析">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>
+    <span>广告分析</span>
   </a>
   <a class="rail-item" data-path="/studio" href="/studio" title="素材生成">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
     <span>素材生成</span>
   </a>
   <div class="rail-sp"></div>
@@ -149,56 +179,73 @@
 </header>
 
 <div id="scroll">
-<main>
-  <div class="notice" id="notice"></div>
+<div class="studio">
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between">
-      <div class="seg" id="typeSeg">
-        <button data-type="video" class="on" onclick="setType('video')">视频生成</button>
-        <button data-type="image" onclick="setType('image')">图片生成</button>
-      </div>
-      <button class="soft" onclick="openPick()">📋 从分析结果选择提示词</button>
+  <!-- 左：生成面板 -->
+  <aside class="gen-panel">
+    <div class="notice" id="notice"></div>
+
+    <div class="seg" id="typeSeg" style="margin-bottom:14px">
+      <button data-type="video" class="on" onclick="setType('video')">文生视频 / 图生视频</button>
     </div>
 
-    <div class="row">
-      <label>模型</label>
-      <select id="model" style="min-width:240px" onchange="onModelChange()"></select>
-      <label>分组</label>
-      <input id="project" placeholder="生成" size="10" value="生成"
-             title="生成结果按分组归档到 R2（复用多租户命名空间）">
+    <h3>模型</h3>
+    <div class="field">
+      <select id="model" style="width:100%" onchange="onModelChange()"></select>
     </div>
 
-    <div class="row" id="paramRow"></div>
-
-    <div class="srcbar" id="srcbar">
-      <span id="srcTxt"></span><span class="x" onclick="clearSrc()">✕ 清除来源</span>
-    </div>
-    <textarea id="prompt" placeholder="描述你想生成的画面；也可点右上「从分析结果选择提示词」把分析出的镜头脚本一键填入…"></textarea>
-
-    <div class="row" style="margin-top:12px">
-      <label>参考图/首帧 URL（可选）</label>
-      <input id="refimg" placeholder="https://…/xxx.jpg（图生视频/垫图用）" style="flex:1;min-width:280px">
+    <div class="field">
+      <div class="prow" id="paramRow"></div>
     </div>
 
-    <div class="row" style="justify-content:flex-end;margin-bottom:0">
-      <span class="chip" id="estChip">预计消耗 —</span>
-      <span class="muted" id="genHint" style="font-size:12px"></span>
-      <button class="primary" id="btnGen" onclick="doGenerate()">开始生成</button>
-    </div>
-  </div>
+    <h3 style="display:flex;justify-content:space-between;align-items:center">
+      <span>提示词</span>
+      <button class="soft" style="padding:5px 10px;font-size:12px" onclick="openPick()">📋 用分析结果</button>
+    </h3>
+    <div class="srcbar" id="srcbar"><span id="srcTxt"></span><span class="x" onclick="clearSrc()">✕</span></div>
+    <textarea id="prompt" placeholder="描述你想生成的画面；也可点「用分析结果」把分析出的镜头脚本一键填入…" maxlength="2000"></textarea>
 
-  <div class="card">
-    <h2 style="display:flex;justify-content:space-between;align-items:center">
-      <span>生成结果</span>
-      <span>
-        <label class="muted" style="font-size:12px;margin-right:8px"><input type="checkbox" id="teamView" onchange="loadGallery()"> 看全体</label>
-        <button onclick="loadGallery()">刷新</button>
+    <div class="field" style="margin-top:12px">
+      <label>参考图 / 首帧 URL（可选，图生视频用）</label>
+      <input id="refimg" placeholder="https://…/xxx.jpg" style="width:100%">
+    </div>
+
+    <div class="field">
+      <label>归属分组</label>
+      <input id="project" placeholder="生成" value="生成" style="width:100%">
+    </div>
+
+    <div class="credits">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+      <span id="estChip">预计消耗 —</span>
+    </div>
+    <button class="primary" id="btnGen" onclick="doGenerate()">✨ 开始生成</button>
+    <div class="muted" id="genHint" style="font-size:12px;text-align:center;margin-top:8px"></div>
+  </aside>
+
+  <!-- 右：结果任务 -->
+  <section class="results">
+    <div class="res-hd">
+      <span class="ttl">生成结果</span>
+      <span style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <button class="iconbtn on" id="viewMine" onclick="setView(1)" title="个人">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>
+          <span class="lbl">个人</span>
+        </button>
+        <button class="iconbtn" id="viewTeam" onclick="setView(0)" title="团队">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.4"/><path d="M2.5 20c0-3.6 3-5.6 6.5-5.6"/><circle cx="17" cy="9" r="2.8"/><path d="M14.5 14.6c3.2 .1 6 1.9 6 5.4"/></svg>
+          <span class="lbl">团队</span>
+        </button>
+        <button class="iconbtn" onclick="loadGallery()" title="刷新">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v5h-5"/></svg>
+          <span class="lbl">刷新</span>
+        </button>
       </span>
-    </h2>
+    </div>
     <div class="gallery" id="gallery"><div class="muted">加载中…</div></div>
-  </div>
-</main>
+  </section>
+
+</div>
 </div>
 
 <!-- 提示词选取抽屉 -->
@@ -217,7 +264,7 @@
 <script>
 const $=s=>document.querySelector(s);
 let _token=null,_user='',_role='';
-let MODELS=[],_curType='video',_pollTimer=null,_pickProjects=[];
+let MODELS=[],_curType='video',_mine=1,_pollTimer=null,_pickProjects=[];
 
 function _loadToken(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||null}catch(e){return null}}
 const headers=()=>_token?{'Authorization':'Bearer '+_token}:{};
@@ -243,28 +290,24 @@ async function boot(){
     $('#um-name').textContent=_user;$('#um-role').textContent=_role==='admin'?'管理员':'成员';
     if(_role==='admin')$('#um-admin').style.display='block';
   }catch(e){location.href='/';return;}
-  await loadModels();
-  prefill();
-  loadGallery();
+  await loadModels();prefill();loadGallery();
 }
 
 // ── 模型/参数 ──
 async function loadModels(){
   const r=await fetch('/gen/models',{headers:headers()});const d=await r.json();
-  MODELS=d.models||[];
-  const p=d.providers||{};
+  MODELS=d.models||[];const p=d.providers||{};
   const chip=$('#provChip');
   if(p.seedance){chip.className='chip ok';chip.textContent='Seedance ✓ 已就绪';}
   else{chip.className='chip warn';chip.textContent='Seedance 未配置';
     const n=$('#notice');n.style.display='block';
-    n.textContent='⚠ 尚未配置 SEEDANCE_KEY。请在 Railway 变量里填入你的 Seedance API key，即可开始生成视频。';
-  }
+    n.textContent='⚠ 尚未配置 SEEDANCE_KEY，配置后即可生成。';}
   buildModelSelect();
 }
 function buildModelSelect(){
   const sel=$('#model');sel.innerHTML='';
   const list=MODELS.filter(m=>m.kind===_curType);
-  if(!list.length){sel.innerHTML='<option>（该类型暂无可用模型）</option>';$('#paramRow').innerHTML='';return;}
+  if(!list.length){sel.innerHTML='<option>（暂无可用模型）</option>';$('#paramRow').innerHTML='';return;}
   list.forEach(m=>{const o=document.createElement('option');o.value=m.id;
     o.textContent=m.label+(m.configured?'':'（未配置）');sel.appendChild(o);});
   onModelChange();
@@ -273,7 +316,7 @@ function curModel(){return MODELS.find(m=>m.id===$('#model').value)}
 function onModelChange(){
   const m=curModel();const row=$('#paramRow');row.innerHTML='';
   if(!m)return;
-  const mk=(label,html)=>{const w=document.createElement('div');w.style.cssText='display:flex;gap:6px;align-items:center';
+  const mk=(label,html)=>{const w=document.createElement('div');w.className='pcell';
     w.innerHTML='<label>'+label+'</label>'+html;row.appendChild(w);};
   const opts=(arr,sel)=>arr.map(v=>'<option value="'+v+'"'+(v==sel?' selected':'')+'>'+v+'</option>').join('');
   if(m.kind==='video'){
@@ -289,8 +332,7 @@ function onModelChange(){
 }
 function gatherParams(){
   const p={};['duration','resolution','aspect','num'].forEach(k=>{const el=$('#p_'+k);if(el)p[k]=el.value});
-  if(p.duration)p.duration=+p.duration;if(p.num)p.num=+p.num;
-  return p;
+  if(p.duration)p.duration=+p.duration;if(p.num)p.num=+p.num;return p;
 }
 function estUsd(m,p){
   if(!m)return 0;
@@ -300,25 +342,19 @@ function estUsd(m,p){
       if(m.table[dur]!=null)return +m.table[dur];
       const keys=Object.keys(m.table).map(Number);
       const k=keys.reduce((a,b)=>Math.abs(b-dur)<Math.abs(a-dur)?b:a,keys[0]);
-      return m.table[k]/k*dur;
-    }
+      return m.table[k]/k*dur;}
     if(m.price_kind==='mini'&&m.mini_rate){
       const rate=m.mini_rate[p.resolution]||m.mini_rate['720p']||0;
-      return Math.ceil(rate*dur*100)/100;
-    }
-    return 0;
-  }
+      return Math.ceil(rate*dur*100)/100;}
+    return 0;}
   return (m.usd_per_image||0)*(p.num||1);
 }
 function updEst(){
   const m=curModel();if(!m){$('#estChip').textContent='预计消耗 —';return;}
   const usd=estUsd(m,gatherParams());
-  const credits=Math.round(usd*100);
-  $('#estChip').textContent='预计消耗 ≈ $'+usd.toFixed(2)+'（约 '+credits+' Seedance 积分）';
+  $('#estChip').innerHTML='预计消耗 <b>≈ $'+usd.toFixed(2)+'</b> · 约 '+Math.round(usd*100)+' Seedance 积分';
 }
-function setType(t){_curType=t;
-  document.querySelectorAll('#typeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.type===t));
-  buildModelSelect();}
+function setType(t){_curType=t;buildModelSelect();}
 
 // ── 生成 ──
 async function doGenerate(){
@@ -334,30 +370,36 @@ async function doGenerate(){
     const d=await r.json().catch(()=>({}));
     if(!r.ok){$('#genHint').textContent='';alert((d&&d.detail)||'提交失败');$('#btnGen').disabled=false;return;}
     $('#genHint').textContent='已提交，生成中（约 1–2 分钟）…';
-    loadGallery();startPolling();
+    if(!_mine){setView(1);}else{loadGallery();}
+    startPolling();
   }catch(e){alert('提交失败：'+e);}
   $('#btnGen').disabled=false;setTimeout(()=>$('#genHint').textContent='',4000);
 }
 function startPolling(){if(_pollTimer)return;let n=0;
   _pollTimer=setInterval(async()=>{n++;await loadGallery();if(n>60){clearInterval(_pollTimer);_pollTimer=null;}},5000);}
 
-// ── 结果画廊 ──
+// ── 结果任务（右）──
+function setView(mine){_mine=mine;
+  $('#viewMine').classList.toggle('on',mine===1);
+  $('#viewTeam').classList.toggle('on',mine===0);
+  loadGallery();}
 async function loadGallery(){
-  const mine=$('#teamView').checked?0:1;
   let jobs=[];
-  try{const r=await fetch('/gen/list?mine='+mine,{headers:headers()});const d=await r.json();jobs=d.jobs||[];}catch(e){}
+  try{const r=await fetch('/gen/list?mine='+_mine,{headers:headers()});const d=await r.json();jobs=d.jobs||[];}catch(e){}
   const g=$('#gallery');
-  if(!jobs.length){g.innerHTML='<div class="muted">还没有生成记录。</div>';return;}
+  if(!jobs.length){g.innerHTML='<div class="muted">'+(_mine?'你还没有生成记录。':'团队还没有生成记录。')+'</div>';return;}
   if(!jobs.some(j=>j.status==='running')&&_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}
   g.innerHTML='';jobs.forEach(j=>g.appendChild(galleryCard(j)));
 }
+const ICON_ONE='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>';
 function galleryCard(j){
   const c=document.createElement('div');c.className='g-card';
   const bcls=j.status==='running'?'b-run':(j.ok?'b-ok':'b-err');
   const btxt=j.status==='running'?'生成中':(j.ok?'完成':'失败');
+  const owner=j.owner?('<span class="g-owner">'+ICON_ONE+esc(j.owner)+'</span>'):'';
   c.innerHTML='<div class="g-media" id="m'+j.id+'">'+(j.status==='running'?'⏳ 生成中…':(j.ok?'':'✗ '+esc(j.detail||'失败')))+'</div>'+
     '<div class="g-body"><div class="p">'+esc(j.ref||'')+'</div>'+
-    '<div class="g-meta"><span>'+esc(j.product||'')+(j.owner?' · @'+esc(j.owner):'')+'</span>'+
+    '<div class="g-meta"><span>'+esc(j.product||'')+'</span>'+owner+
     '<span class="badge '+bcls+'">'+btxt+'</span></div></div>';
   if(j.status==='done'&&j.ok)loadMeta(j.id);
   return c;
@@ -371,8 +413,8 @@ async function loadMeta(id){
   }catch(e){}
 }
 
-// ── 提示词选取抽屉（联动分析结果）──
-function openPick(){document.body.classList.add('pick-open');setTimeout(measureHdr,240);if(!_pickProjects.length)loadPickProjects();}
+// ── 提示词选取抽屉 ──
+function openPick(){document.body.classList.add('pick-open');if(!_pickProjects.length)loadPickProjects();}
 function closePick(){document.body.classList.remove('pick-open');}
 async function loadPickProjects(){
   const mine=$('#pickTeam').checked?0:1;
@@ -381,11 +423,11 @@ async function loadPickProjects(){
     const sel=$('#pickProject');sel.innerHTML='<option value="">选择一个已分析的分组…</option>';
     _pickProjects.forEach((p,i)=>{const o=document.createElement('option');o.value=i;
       o.textContent=p.project_id+(p.owner?'（@'+p.owner+'）':'');sel.appendChild(o);});
-    $('#pickBody').innerHTML='<div class="muted">'+(_pickProjects.length?'请选择一个分组。':'暂无已分析的分组。到「视频广告分析」跑完分析后再来。')+'</div>';
+    $('#pickBody').innerHTML='<div class="muted">'+(_pickProjects.length?'请选择一个分组。':'暂无已分析的分组。到「广告分析」跑完分析后再来。')+'</div>';
   }catch(e){$('#pickBody').innerHTML='<div class="muted">加载失败。</div>';}
 }
 async function loadPickItems(){
-  const i=$('#pickProject').value;if(i===''){return;}
+  const i=$('#pickProject').value;if(i==='')return;
   const p=_pickProjects[+i];
   $('#pickBody').innerHTML='<div class="muted">加载中…</div>';
   try{const r=await fetch('/gen/prompt_pick?project_id='+encodeURIComponent(p.project_id)+'&owner='+encodeURIComponent(p.owner||''),{headers:headers()});
@@ -395,16 +437,13 @@ async function loadPickItems(){
 function renderPickItems(items){
   const bd=$('#pickBody');
   if(!items.length){bd.innerHTML='<div class="muted">该分组没有可用的提示词产物。</div>';return;}
-  // 按 批次 > 广告 分组
-  const groups={};
-  items.forEach(it=>{const g=it.batch||'-';(groups[g]=groups[g]||[]).push(it);});
+  const groups={};items.forEach(it=>{const g=it.batch||'-';(groups[g]=groups[g]||[]).push(it);});
   bd.innerHTML='';
   Object.keys(groups).forEach(g=>{
     const gd=document.createElement('div');gd.className='pgroup';
     gd.innerHTML='<div class="h">批次 '+esc(g)+'</div>';
     groups[g].forEach(it=>gd.appendChild(pickItemNode(it)));
-    bd.appendChild(gd);
-  });
+    bd.appendChild(gd);});
 }
 function pickItemNode(it){
   const lv={video:['视频级','lv-video'],shot:['镜头 '+(it.idx||''),'lv-shot'],common:['共性','lv-common']}[it.level]||['',''];
@@ -414,20 +453,19 @@ function pickItemNode(it){
   el.innerHTML='<div><span class="lv '+lv[1]+'">'+esc(lv[0])+'</span>'+adline+'</div>'+
     '<div class="t">'+esc(it.text)+'</div>'+sell+
     '<div class="act"><button class="soft" onclick="fillFromPick(this)">填入提示词</button></div>';
-  el._it=it;el.querySelector('button')._it=it;
+  el.querySelector('button')._it=it;
   return el;
 }
 function fillFromPick(btn){
   const it=btn._it;setType('video');
   $('#prompt').value=it.text;
   const lvname={video:'视频级脚本',shot:'镜头 '+(it.idx||''),common:'共性镜头'}[it.level]||'';
-  $('#srcTxt').textContent='来源：'+ (it.batch||'') + (it.ad?(' · '+it.ad):'') + ' · '+lvname;
+  $('#srcTxt').textContent='来源：'+(it.batch||'')+(it.ad?(' · '+it.ad):'')+' · '+lvname;
   $('#srcbar').classList.add('on');
-  closePick();window.scrollTo({top:0});$('#prompt').focus();
+  closePick();$('#prompt').focus();
 }
 function clearSrc(){$('#srcbar').classList.remove('on');$('#prompt').value='';}
 
-// 从「送去生成」链接预填
 function prefill(){
   try{const q=new URLSearchParams(location.search);
     let pf=null;const raw=localStorage.getItem('genPrefill');
