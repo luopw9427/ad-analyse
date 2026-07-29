@@ -41,6 +41,7 @@ import r2_storage as r2
 import db
 import translator
 import reviser
+import gen_providers as gen
 
 ROOT = Path(__file__).resolve().parent
 RUN_FROM_R2 = ROOT / "批处理" / "run_from_r2.py"
@@ -53,6 +54,11 @@ ADMIN_USER = os.environ.get("ADMIN_USER", "")
 ADMIN_PIN = os.environ.get("ADMIN_PIN", "")
 TOKEN_DAYS_REMEMBER = int(os.environ.get("TOKEN_DAYS_REMEMBER", "0"))   # 0 = 记住则永久
 TOKEN_HOURS_SESSION = int(os.environ.get("TOKEN_HOURS_SESSION", "12"))  # 不记住的短效
+# ── 素材生成 · 积分 ────────────────────────────────────────────
+# 1 积分 = CREDIT_USD 美元。成本→积分 = ceil(usd / CREDIT_USD)。默认 1 积分≈$0.01。
+CREDIT_USD = float(os.environ.get("CREDIT_USD", "0.01"))
+# 是否硬扣积分：0=只记录成本不拦截（一期建议），1=余额不足拒绝生成
+CREDITS_ENFORCE = os.environ.get("CREDITS_ENFORCE", "0") == "1"
 # 分析产物里需要翻译成英文的 JSON（键名结构保留，只译值）→ 存为同名 .en.json
 TRANSLATE_NAMES = ("ad_aggregate.json", "video_prompt.json",
                    "shot_prompts.json", "共性镜头prompt.json")
@@ -209,6 +215,13 @@ def account_page():
 def admin_page():
     """管理员后台（独立页）。"""
     return FileResponse(ROOT / "admin.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
+
+
+@app.get("/studio")
+def studio_page():
+    """素材生成主页（独立页，与分析主页共享左栏）。"""
+    return FileResponse(ROOT / "generate.html",
         headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
 
 
@@ -1103,3 +1116,170 @@ def prompt_revise(req: ReviseReq, user: dict = Depends(current_user)):
     job_id = db.start_job("prompt_edit", req.project_id, ref, batch=req.batch or "", owner=user["username"])
     threading.Thread(target=_run_revise_bg, args=(req, job_id, target_owner), daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id}
+
+
+# ══════════════════════════════════════════════════════════════════
+# 素材生成模块（Studio）
+# ══════════════════════════════════════════════════════════════════
+def _usd_to_credits(usd: float) -> int:
+    """成本(美元)→积分，向上取整，至少 1。"""
+    import math
+    if usd <= 0:
+        return 0
+    return max(1, math.ceil(usd / max(CREDIT_USD, 1e-9)))
+
+
+class GenReq(BaseModel):
+    type: str                       # video / image
+    model: str                      # 模型 id（见 /gen/models）
+    prompt: str
+    project_id: Optional[str] = "生成"     # 归属分组（复用多租户命名空间）
+    params: Optional[dict] = None          # {duration,resolution,aspect,audio,num,...}
+    ref_image_url: Optional[str] = None    # 参考图/首帧（图生视频/垫图）
+    source: Optional[str] = None           # 来源标记（如"来自分析:批次#序号"）
+
+
+@app.get("/gen/models")
+def gen_models(kind: Optional[str] = None):
+    """模型目录（供前端渲染选择器）。kind 可过滤 video/image。"""
+    return {"models": gen.list_models(kind), "providers": gen.providers_status()}
+
+
+@app.get("/gen/status")
+def gen_status(user: dict = Depends(current_user)):
+    """当前用户积分 + 服务配置状态。"""
+    return {
+        "credits": db.user_credits(user["username"]),
+        "credit_usd": CREDIT_USD,
+        "enforce": CREDITS_ENFORCE,
+        "providers": gen.providers_status(),
+    }
+
+
+def _run_gen_bg(job_id, owner: str, project_id: str, batch: str,
+                gtype: str, model: str, prompt: str, params: dict,
+                ref_image_url: str, est_usd: float, credits_charged: int):
+    """后台执行生成：调 provider → 下载产物 → 转存 R2 → 写 meta → 结算任务。"""
+    import requests as _rq
+    t0 = time.time()
+    epid = _epid(owner, project_id)
+    prefix = f"gen/{epid}/{batch}/"
+    try:
+        outs = gen.generate(model, prompt, params or {}, ref_image_url or "")
+        items = []
+        for i, o in enumerate(outs):
+            url = o["url"]; okind = o.get("kind", gtype)
+            ext = ".mp4" if okind == "video" else ".png"
+            for e in (".mp4", ".webm", ".mov", ".png", ".jpg", ".jpeg", ".webp"):
+                if url.lower().split("?")[0].endswith(e):
+                    ext = e; break
+            ct = "video/mp4" if okind == "video" else ("image/png" if ext == ".png" else "image/jpeg")
+            data = _rq.get(url, timeout=180).content
+            key = f"{prefix}item_{i:02d}{ext}"
+            pub = r2.upload_bytes(key, data, ct)
+            items.append({"kind": okind, "key": key, "url": pub})
+        meta = {
+            "type": gtype, "model": model, "prompt": prompt, "params": params or {},
+            "ref_image_url": ref_image_url or "", "source": "", "owner": owner,
+            "project_id": project_id, "batch": batch, "items": items,
+            "est_usd": est_usd, "credits": credits_charged,
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        r2.upload_json(f"{prefix}meta.json", meta)
+        db.finish_job(job_id, True, prefix,
+                      f"生成完成：{model} × {len(items)} 个产物",
+                      time.time() - t0, cost_usd=est_usd, cost_exact=False)
+    except gen.ProviderNotConfigured as e:
+        _gen_refund(owner, credits_charged)
+        db.finish_job(job_id, False, "", f"未配置服务：{e}", time.time() - t0)
+    except Exception as e:
+        _gen_refund(owner, credits_charged)
+        db.finish_job(job_id, False, "", f"{type(e).__name__}: {e}", time.time() - t0)
+
+
+def _gen_refund(owner: str, credits_charged: int):
+    """生成失败退还已扣积分。"""
+    if credits_charged > 0:
+        try:
+            db.user_add_credits(owner, credits_charged)
+        except Exception:
+            pass
+
+
+@app.post("/gen/create")
+def gen_create(req: GenReq, user: dict = Depends(current_user)):
+    if req.type not in ("video", "image"):
+        raise HTTPException(status_code=400, detail="type 必须为 video/image")
+    m = gen.MODEL_CATALOG.get(req.model)
+    if not m:
+        raise HTTPException(status_code=400, detail=f"未知模型：{req.model}")
+    if m["kind"] != req.type:
+        raise HTTPException(status_code=400, detail="模型与生成类型不匹配")
+    if not (req.prompt or "").strip() and not req.ref_image_url:
+        raise HTTPException(status_code=400, detail="请填写提示词或提供参考图")
+
+    params = req.params or {}
+    est_usd = gen.estimate_usd(req.model, params)
+    need = _usd_to_credits(est_usd)
+
+    # 积分：管理员不扣；开启硬扣且余额不足则拒绝
+    credits_charged = 0
+    if CREDITS_ENFORCE and user["role"] != "admin":
+        if not db.user_try_deduct(user["username"], need):
+            raise HTTPException(status_code=402,
+                detail=f"积分不足：本次约需 {need} 积分，请联系管理员充值")
+        credits_charged = need
+
+    owner = user["username"]
+    project_id = (req.project_id or "生成").strip() or "生成"
+    batch = time.strftime("%Y%m%d-%H%M%S") + f"-{req.model}"
+    kind = "gen_video" if req.type == "video" else "gen_image"
+    ref = (req.prompt or "")[:60]
+    job_id = db.start_job(kind, project_id, ref, product=req.model, batch=batch, owner=owner)
+    threading.Thread(target=_run_gen_bg,
+                     args=(job_id, owner, project_id, batch, req.type, req.model,
+                           req.prompt or "", params, req.ref_image_url or "",
+                           est_usd, credits_charged),
+                     daemon=True).start()
+    return {"ok": True, "started": True, "job_id": job_id, "batch": batch,
+            "est_usd": est_usd, "est_credits": need}
+
+
+@app.get("/gen/list")
+def gen_list(mine: int = 1, user: dict = Depends(current_user)):
+    """生成任务列表。mine=1 只看自己，mine=0 看全体（团队可见）。"""
+    owner = user["username"] if mine else ""
+    return {"jobs": db.gen_list(owner, 60)}
+
+
+@app.get("/gen/result")
+def gen_result(job_id: int, user: dict = Depends(current_user)):
+    """按任务读取生成产物 meta。"""
+    for j in db.gen_list("", 200):
+        if j["id"] == job_id:
+            prefix = j.get("r2_prefix") or ""
+            if not prefix:
+                return {"status": j["status"], "detail": j.get("detail"), "meta": None}
+            try:
+                meta = r2.read_json(f"{prefix}meta.json")
+            except Exception:
+                meta = None
+            return {"status": j["status"], "ok": j["ok"], "detail": j.get("detail"),
+                    "owner": j.get("owner"), "meta": meta}
+    raise HTTPException(status_code=404, detail="任务不存在")
+
+
+class CreditReq(BaseModel):
+    username: str
+    delta: int
+
+
+@app.post("/users/credits")
+def users_credits(req: CreditReq, request: Request, user: dict = Depends(require_admin)):
+    """管理员给用户充值/调整积分。"""
+    bal = db.user_add_credits(req.username.strip(), int(req.delta))
+    if bal < 0:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db.audit(user["username"], _client_ip(request), "user_credits",
+             f"{req.username} {'+' if req.delta >= 0 else ''}{req.delta} → {bal}")
+    return {"ok": True, "username": req.username, "credits": bal}

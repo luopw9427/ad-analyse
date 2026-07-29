@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>素材生成</title>
+<style>
+  :root{
+    --bg:#eef2f8; --panel:#ffffff; --panel-2:#f7f9fc;
+    --ink:#1b2431; --sub:#5a6678; --muted:#9aa6b6;
+    --line:#e7ecf3; --line-2:#dde4ee;
+    --accent:#2f6bed; --accent-ink:#1e51c4; --accent-weak:#eaf1fe;
+    --ok:#15a34a; --ok-bg:#e9f7ee; --warn:#c26a12; --warn-bg:#fbf1e2;
+    --run:#5a52d8; --run-bg:#eeecfb;
+    --r:14px; --r-sm:9px; --rail-w:56px;
+    --sh:0 1px 2px rgba(16,24,40,.04), 0 8px 24px rgba(16,24,40,.05);
+    --sh-sm:0 1px 2px rgba(16,24,40,.05);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#edf1f7;color:var(--ink);
+    font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
+
+  /* 窄左栏 */
+  #rail{position:fixed;left:0;top:0;bottom:0;width:var(--rail-w);z-index:50;
+    background:#0f1830;display:flex;flex-direction:column;gap:4px;padding:10px 8px;
+    transition:width .2s ease;overflow:hidden}
+  body.rail-open{--rail-w:196px}
+  .rail-toggle{background:transparent;border:0;color:#8f9bb3;cursor:pointer;padding:9px;
+    border-radius:9px;display:flex;align-items:center;margin-bottom:6px}
+  .rail-toggle:hover{background:rgba(255,255,255,.08);color:#fff}
+  .rail-item{display:flex;align-items:center;gap:13px;color:#aeb8cc;text-decoration:none;
+    padding:11px 10px;border-radius:10px;white-space:nowrap;font-weight:600;font-size:13px}
+  .rail-item:hover{background:rgba(255,255,255,.08);color:#fff}
+  .rail-item.active{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff}
+  .rail-item svg{flex:0 0 20px}
+  .rail-item span{opacity:0;transition:opacity .15s}
+  body.rail-open .rail-item span{opacity:1}
+  .rail-sp{flex:1 1 auto}
+  .rail-brand{color:#5f6b85;font-size:11px;text-align:center;padding:6px 0;white-space:nowrap;opacity:0}
+  body.rail-open .rail-brand{opacity:1}
+
+  header{padding:14px 28px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap;
+    position:fixed;top:0;left:var(--rail-w);right:0;z-index:40;transition:left .2s ease}
+  header h1{font-size:16px;margin:0 8px 0 0;font-weight:700;
+    background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .muted{color:var(--sub)}
+  .chip{background:var(--accent-weak);color:var(--accent-ink);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600}
+  .chip.warn{background:var(--warn-bg);color:var(--warn)}
+
+  input,select,textarea{background:#fff;border:1px solid var(--line-2);color:var(--ink);
+    padding:8px 11px;border-radius:var(--r-sm);font-size:13px;outline:none;transition:.15s;font-family:inherit}
+  textarea{width:100%;min-height:96px;resize:vertical;line-height:1.6}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-weak)}
+  button{background:#fff;border:1px solid var(--line-2);color:var(--sub);padding:8px 16px;border-radius:var(--r-sm);
+    cursor:pointer;font-size:13px;font-weight:600;transition:.15s;box-shadow:var(--sh-sm)}
+  button:hover{background:var(--accent-weak);color:var(--accent);border-color:var(--accent)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  button.primary{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff;border:0;padding:10px 22px}
+  button.primary:hover{filter:brightness(1.05)}
+
+  #scroll{position:fixed;left:var(--rail-w);right:0;top:var(--hdr-h,58px);bottom:0;overflow-y:auto;transition:left .2s ease}
+  main{max-width:1200px;margin:0 auto;padding:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin-bottom:18px;box-shadow:var(--sh)}
+  .card h2{font-size:15px;margin:0 0 14px}
+  .seg{display:inline-flex;background:var(--panel-2);border:1px solid var(--line-2);border-radius:999px;padding:3px}
+  .seg button{background:transparent;border:0;box-shadow:none;border-radius:999px;padding:7px 18px}
+  .seg button.on{background:#fff;color:var(--accent);box-shadow:var(--sh-sm)}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+  .row label{font-size:12px;color:var(--sub);font-weight:600}
+  .avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#2f6bed,#5a52d8);color:#fff;
+    border:0;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .usermenu{position:relative}
+  .usermenu-pop{position:absolute;right:0;top:42px;background:#fff;border:1px solid var(--line);border-radius:12px;
+    box-shadow:var(--sh);padding:8px;min-width:170px;display:none;z-index:60}
+  .usermenu:hover .usermenu-pop{display:block}
+  .usermenu-pop::before{content:"";position:absolute;right:0;top:-12px;width:60px;height:12px}
+  .um-item{display:block;width:100%;text-align:left;background:transparent;border:0;box-shadow:none;padding:9px 12px;border-radius:8px}
+  .um-item:hover{background:var(--accent-weak)}
+  .um-head{padding:6px 12px 10px;border-bottom:1px solid var(--line);margin-bottom:6px}
+
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}
+  .g-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh-sm)}
+  .g-media{width:100%;aspect-ratio:16/10;background:#0c1222;display:flex;align-items:center;justify-content:center;color:#6b7796;font-size:12px}
+  .g-media video,.g-media img{width:100%;height:100%;object-fit:cover}
+  .g-body{padding:11px 13px}
+  .g-body .p{font-size:12px;color:var(--sub);max-height:52px;overflow:hidden;line-height:1.5}
+  .g-meta{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:11px;color:var(--muted)}
+  .badge{font-size:11px;padding:2px 9px;border-radius:999px;font-weight:600}
+  .b-run{background:var(--run-bg);color:var(--run)} .b-ok{background:var(--ok-bg);color:var(--ok)} .b-err{background:var(--warn-bg);color:var(--warn)}
+  .notice{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:14px;display:none}
+</style>
+</head>
+<body>
+<nav id="rail">
+  <button class="rail-toggle" onclick="toggleRail()" title="展开/收起">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="rail-item" data-path="/" href="/" title="视频广告分析">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+    <span>视频广告分析</span>
+  </a>
+  <a class="rail-item" data-path="/studio" href="/studio" title="素材生成">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>
+    <span>素材生成</span>
+  </a>
+  <div class="rail-sp"></div>
+  <div class="rail-brand">云熙汇智</div>
+</nav>
+
+<header>
+  <h1>素材生成</h1>
+  <span class="muted" style="font-size:12px">提示词 → AI 视频/图片素材</span>
+  <span style="margin-left:auto;display:flex;gap:12px;align-items:center">
+    <span class="chip" id="creditChip">积分 —</span>
+    <div id="userMenu" class="usermenu">
+      <button class="avatar" id="avatarBtn" title="账号">U</button>
+      <div class="usermenu-pop">
+        <div class="um-head"><b id="um-name"></b> <span id="um-role" class="muted"></span></div>
+        <button class="um-item" onclick="location.href='/account'">个人中心</button>
+        <button class="um-item" onclick="location.href='/account'">账号设置</button>
+        <button class="um-item" id="um-admin" style="display:none" onclick="location.href='/admin'">后台管理</button>
+      </div>
+    </div>
+  </span>
+</header>
+
+<div id="scroll">
+<main>
+  <div class="notice" id="notice"></div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="seg" id="typeSeg">
+        <button data-type="video" class="on" onclick="setType('video')">视频生成</button>
+        <button data-type="image" onclick="setType('image')">图片生成</button>
+      </div>
+      <span class="chip" id="estChip">预计消耗 —</span>
+    </div>
+
+    <div class="row">
+      <label>模型</label>
+      <select id="model" style="min-width:260px" onchange="onModelChange()"></select>
+      <label>分组</label>
+      <input id="project" placeholder="生成" size="10" value="生成"
+             title="生成结果按分组归档到 R2（复用多租户命名空间）">
+    </div>
+
+    <div class="row" id="paramRow"></div>
+
+    <textarea id="prompt" placeholder="描述你想生成的画面（可从「视频广告分析」的提示词一键送来）…"></textarea>
+
+    <div class="row" style="margin-top:12px">
+      <label>参考图/首帧 URL（可选）</label>
+      <input id="refimg" placeholder="https://…/xxx.jpg（图生视频/垫图用）" style="flex:1;min-width:280px">
+    </div>
+
+    <div class="row" style="justify-content:flex-end;margin-bottom:0">
+      <span class="muted" id="genHint" style="font-size:12px"></span>
+      <button class="primary" id="btnGen" onclick="doGenerate()">开始生成</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2 style="display:flex;justify-content:space-between;align-items:center">
+      <span>生成结果</span>
+      <span>
+        <label class="muted" style="font-size:12px;margin-right:8px"><input type="checkbox" id="teamView" onchange="loadGallery()"> 看全体</label>
+        <button onclick="loadGallery()">刷新</button>
+      </span>
+    </h2>
+    <div class="gallery" id="gallery"><div class="muted">加载中…</div></div>
+  </div>
+</main>
+</div>
+
+<script>
+const $=s=>document.querySelector(s);
+let _token=null,_user='',_role='';
+let MODELS=[],_curType='video',_pollTimer=null;
+
+function _loadToken(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||null}catch(e){return null}}
+const headers=()=>_token?{'Authorization':'Bearer '+_token}:{};
+
+// ── 左栏 ──
+function toggleRail(){const on=!document.body.classList.contains('rail-open');
+  document.body.classList.toggle('rail-open',on);try{localStorage.setItem('railOpen',on?'1':'0')}catch(e){}
+  setTimeout(measureHdr,220);}
+function initRail(){let o='0';try{o=localStorage.getItem('railOpen')||'0'}catch(e){}
+  document.body.classList.toggle('rail-open',o==='1');
+  const p=location.pathname.replace(/\/+$/,'')||'/';
+  document.querySelectorAll('#rail .rail-item').forEach(a=>a.classList.toggle('active',a.getAttribute('data-path')===p));}
+function measureHdr(){const h=$('header');if(h)document.documentElement.style.setProperty('--hdr-h',h.offsetHeight+'px');}
+
+// ── 鉴权 ──
+async function boot(){
+  _token=_loadToken();
+  if(!_token){location.href='/';return;}
+  try{const r=await fetch('/auth/me',{headers:headers()});if(!r.ok)throw 0;
+    const d=await r.json();_user=d.username;_role=d.role;
+    $('#avatarBtn').textContent=(_user[0]||'U').toUpperCase();
+    $('#um-name').textContent=_user;$('#um-role').textContent=_role==='admin'?'管理员':'成员';
+    if(_role==='admin')$('#um-admin').style.display='block';
+  }catch(e){location.href='/';return;}
+  await loadModels();
+  await refreshStatus();
+  prefill();
+  loadGallery();
+}
+
+async function refreshStatus(){
+  try{const r=await fetch('/gen/status',{headers:headers()});const d=await r.json();
+    $('#creditChip').textContent='积分 '+d.credits;
+    window._enforce=d.enforce;window._creditUsd=d.credit_usd;
+  }catch(e){}
+}
+
+// ── 模型/参数 ──
+async function loadModels(){
+  const r=await fetch('/gen/models',{headers:headers()});const d=await r.json();
+  MODELS=d.models||[];
+  const p=d.providers||{};
+  if(!p.fal&&!p.replicate){
+    const n=$('#notice');n.style.display='block';
+    n.textContent='⚠ 生成服务尚未配置 API key（FAL_KEY / REPLICATE_API_TOKEN）。界面可预览，配置后即可真正生成。';
+  }
+  buildModelSelect();
+}
+function buildModelSelect(){
+  const sel=$('#model');sel.innerHTML='';
+  MODELS.filter(m=>m.kind===_curType).forEach(m=>{
+    const o=document.createElement('option');o.value=m.id;
+    o.textContent=m.label+(m.configured?'':'（未配置）');
+    sel.appendChild(o);
+  });
+  onModelChange();
+}
+function curModel(){return MODELS.find(m=>m.id===$('#model').value)}
+function onModelChange(){
+  const m=curModel();const row=$('#paramRow');row.innerHTML='';
+  if(!m)return;
+  const mk=(label,html)=>{const w=document.createElement('div');w.style.cssText='display:flex;gap:6px;align-items:center';
+    w.innerHTML='<label>'+label+'</label>'+html;row.appendChild(w);};
+  const opts=(arr)=>arr.map(v=>'<option value="'+v+'">'+v+'</option>').join('');
+  if(m.kind==='video'){
+    if(m.durations.length)mk('时长(秒)','<select id="p_duration">'+opts(m.durations)+'</select>');
+    if(m.resolutions.length)mk('分辨率','<select id="p_resolution">'+opts(m.resolutions)+'</select>');
+    if(m.aspects.length)mk('画幅','<select id="p_aspect">'+opts(m.aspects)+'</select>');
+    if(m.audio)mk('音频','<input type="checkbox" id="p_audio">');
+  }else{
+    if(m.resolutions.length)mk('尺寸','<select id="p_resolution">'+opts(m.resolutions)+'</select>');
+    mk('数量','<select id="p_num"><option>1</option><option>2</option><option>3</option><option>4</option></select>');
+  }
+  updEst();
+  ['p_duration','p_resolution','p_num'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',updEst)});
+}
+function gatherParams(){
+  const p={};['duration','resolution','aspect','num'].forEach(k=>{const el=$('#p_'+k);if(el)p[k]=el.value});
+  const a=$('#p_audio');if(a)p.audio=a.checked;
+  if(p.duration)p.duration=+p.duration;if(p.num)p.num=+p.num;
+  return p;
+}
+function updEst(){
+  const m=curModel();if(!m){$('#estChip').textContent='预计消耗 —';return;}
+  const p=gatherParams();let usd=0;
+  if(m.kind==='video'){const dur=p.duration||(m.durations[0]||5);
+    const mult={'480p':0.7,'720p':1,'1080p':1.6,'4k':3}[p.resolution]||1;
+    usd=(m.usd_per_sec||0)*dur*mult*(p.num||1);}
+  else{usd=(m.usd_per_image||0)*(p.num||1);}
+  const cr=usd<=0?0:Math.max(1,Math.ceil(usd/(window._creditUsd||0.01)));
+  $('#estChip').textContent='预计消耗 ≈ '+cr+' 积分（$'+usd.toFixed(3)+'）';
+}
+function setType(t){_curType=t;
+  document.querySelectorAll('#typeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.type===t));
+  buildModelSelect();}
+
+// ── 生成 ──
+async function doGenerate(){
+  const m=curModel();if(!m){alert('请选择模型');return;}
+  const prompt=$('#prompt').value.trim();const ref=$('#refimg').value.trim();
+  if(!prompt&&!ref){alert('请填写提示词或参考图');return;}
+  $('#btnGen').disabled=true;$('#genHint').textContent='提交中…';
+  try{
+    const body={type:_curType,model:m.id,prompt,project_id:$('#project').value.trim()||'生成',
+      params:gatherParams(),ref_image_url:ref||null};
+    const r=await fetch('/gen/create',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){$('#genHint').textContent='';alert((d&&d.detail)||'提交失败');$('#btnGen').disabled=false;return;}
+    $('#genHint').textContent='已提交，生成中…';
+    await refreshStatus();loadGallery();startPolling();
+  }catch(e){alert('提交失败：'+e);}
+  $('#btnGen').disabled=false;setTimeout(()=>$('#genHint').textContent='',3000);
+}
+function startPolling(){if(_pollTimer)return;let n=0;
+  _pollTimer=setInterval(async()=>{n++;await loadGallery();if(n>40){clearInterval(_pollTimer);_pollTimer=null;}},5000);}
+
+// ── 结果画廊 ──
+async function loadGallery(){
+  const mine=$('#teamView').checked?0:1;
+  let jobs=[];
+  try{const r=await fetch('/gen/list?mine='+mine,{headers:headers()});const d=await r.json();jobs=d.jobs||[];}catch(e){}
+  const g=$('#gallery');
+  if(!jobs.length){g.innerHTML='<div class="muted">还没有生成记录。</div>';return;}
+  const anyRun=jobs.some(j=>j.status==='running');
+  if(!anyRun&&_pollTimer){clearInterval(_pollTimer);_pollTimer=null;}
+  g.innerHTML='';
+  jobs.forEach(j=>g.appendChild(galleryCard(j)));
+}
+function galleryCard(j){
+  const c=document.createElement('div');c.className='g-card';
+  const bcls=j.status==='running'?'b-run':(j.ok?'b-ok':'b-err');
+  const btxt=j.status==='running'?'生成中':(j.ok?'完成':'失败');
+  c.innerHTML='<div class="g-media" id="m'+j.id+'">'+(j.status==='running'?'生成中…':(j.ok?'':'✗ '+(j.detail||'失败')))+'</div>'+
+    '<div class="g-body"><div class="p">'+esc(j.ref||'')+'</div>'+
+    '<div class="g-meta"><span>'+esc(j.product||'')+(j.owner?' · @'+esc(j.owner):'')+'</span>'+
+    '<span class="badge '+bcls+'">'+btxt+'</span></div></div>';
+  if(j.status==='done'&&j.ok)loadMeta(j.id);
+  return c;
+}
+async function loadMeta(id){
+  try{const r=await fetch('/gen/result?job_id='+id,{headers:headers()});const d=await r.json();
+    const box=$('#m'+id);if(!box||!d.meta||!d.meta.items||!d.meta.items.length)return;
+    const it=d.meta.items[0];
+    if(it.kind==='video')box.innerHTML='<video src="'+it.url+'" controls preload="metadata"></video>';
+    else box.innerHTML='<img src="'+it.url+'" loading="lazy">';
+  }catch(e){}
+}
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+// 从「送去生成」预填
+function prefill(){
+  try{const q=new URLSearchParams(location.search);
+    let pf=null;const raw=localStorage.getItem('genPrefill');
+    if(raw){pf=JSON.parse(raw);localStorage.removeItem('genPrefill');}
+    const prompt=q.get('prompt')||(pf&&pf.prompt);
+    const type=q.get('type')||(pf&&pf.type);
+    const ref=q.get('ref')||(pf&&pf.ref);
+    if(type&&type!==_curType)setType(type);
+    if(prompt)$('#prompt').value=prompt;
+    if(ref)$('#refimg').value=ref;
+  }catch(e){}
+}
+
+initRail();measureHdr();window.addEventListener('resize',measureHdr);
+boot();
+</script>
+</body>
+</html>

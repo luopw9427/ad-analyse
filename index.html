@@ -17,6 +17,25 @@
     --sh-sm:0 1px 2px rgba(16,24,40,.05);
   }
 :root{--drawer-w:50vw}
+  :root{--rail-w:56px}
+  /* ── 窄左栏（功能区切换器）─────────────────────── */
+  #rail{position:fixed;left:0;top:0;bottom:0;width:var(--rail-w);z-index:50;
+    background:#0f1830;display:flex;flex-direction:column;gap:4px;padding:10px 8px;
+    transition:width .2s ease;overflow:hidden}
+  body.rail-open{--rail-w:196px}
+  .rail-toggle{background:transparent;border:0;color:#8f9bb3;cursor:pointer;padding:9px;
+    border-radius:9px;box-shadow:none;display:flex;align-items:center;font-size:0;margin-bottom:6px}
+  .rail-toggle:hover{background:rgba(255,255,255,.08);color:#fff}
+  .rail-item{display:flex;align-items:center;gap:13px;color:#aeb8cc;text-decoration:none;
+    padding:11px 10px;border-radius:10px;white-space:nowrap;font-weight:600;font-size:13px}
+  .rail-item:hover{background:rgba(255,255,255,.08);color:#fff}
+  .rail-item.active{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff}
+  .rail-item svg{flex:0 0 20px}
+  .rail-item span{opacity:0;transition:opacity .15s}
+  body.rail-open .rail-item span{opacity:1}
+  .rail-sp{flex:1 1 auto}
+  .rail-brand{color:#5f6b85;font-size:11px;text-align:center;padding:6px 0;white-space:nowrap;opacity:0}
+  body.rail-open .rail-brand{opacity:1}
   *{box-sizing:border-box}
   body{margin:0;background:#edf1f7;color:var(--ink);
        font-family:-apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
@@ -24,7 +43,7 @@
 
   header{padding:14px 28px;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
          border-bottom:1px solid var(--line);display:flex;gap:10px;align-items:center;flex-wrap:wrap;
-         position:fixed;top:0;left:0;right:0;z-index:40;box-shadow:0 1px 0 rgba(16,24,40,.02)}
+         position:fixed;top:0;left:var(--rail-w);right:0;z-index:40;box-shadow:0 1px 0 rgba(16,24,40,.02);transition:left .2s ease}
   header h1{font-size:16px;margin:0 14px 0 0;font-weight:700;letter-spacing:.2px;
             background:linear-gradient(90deg,#2f6bed,#5a52d8);-webkit-background-clip:text;background-clip:text;color:transparent}
   header .muted{font-size:12px;color:var(--sub)}
@@ -148,7 +167,7 @@
   body.drawer-open #drawerReopen{display:none}
   #drawer .card{box-shadow:none;border:1px solid var(--line);padding:14px 16px;margin-bottom:14px}
   /* 主区滚动容器：滚动条落在被挤压主区右缘（右边栏左侧） */
-  #scroll{position:fixed;left:0;right:0;top:var(--hdr-h,56px);bottom:0;overflow-y:auto;overflow-x:hidden;transition:right .26s ease}
+  #scroll{position:fixed;left:var(--rail-w);right:0;top:var(--hdr-h,56px);bottom:0;overflow-y:auto;overflow-x:hidden;transition:right .26s ease,left .2s ease}
   body.drawer-open #scroll{right:calc(var(--drawer-w) + 16px)}
   body.drawer-full #scroll{right:0}
   /* 滚动条：默认完全隐藏；仅"正在滚动(.show-sb)"或"鼠标压在滚动条本体上"时才显现 */
@@ -225,6 +244,21 @@
 </style>
 </head>
 <body>
+<nav id="rail">
+  <button class="rail-toggle" onclick="toggleRail()" title="展开/收起">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
+  </button>
+  <a class="rail-item" data-path="/" href="/" title="视频广告分析">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
+    <span>视频广告分析</span>
+  </a>
+  <a class="rail-item" data-path="/studio" href="/studio" title="素材生成">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg>
+    <span>素材生成</span>
+  </a>
+  <div class="rail-sp"></div>
+  <div class="rail-brand">云熙汇智</div>
+</nav>
 <header>
   <h1>视频广告分析</h1>
   <span class="muted">OpenRouter Key</span>
@@ -1338,7 +1372,24 @@ function renderCommon(v,batch){
   return c;
 }
 
+// ── 窄左栏：展开/收起 + 高亮当前功能区 ──
+function toggleRail(){
+  const on=!document.body.classList.contains('rail-open');
+  document.body.classList.toggle('rail-open',on);
+  try{localStorage.setItem('railOpen',on?'1':'0');}catch(e){}
+  setTimeout(measureHdr,220);
+}
+function initRail(){
+  let open='0';try{open=localStorage.getItem('railOpen')||'0';}catch(e){}
+  document.body.classList.toggle('rail-open',open==='1');
+  const path=location.pathname.replace(/\/+$/,'')||'/';
+  document.querySelectorAll('#rail .rail-item').forEach(a=>{
+    a.classList.toggle('active',a.getAttribute('data-path')===path);
+  });
+}
+
 // 初始化：放在所有声明之后，避免 TDZ（wireDrawer 内含 measureHdr）
+initRail();
 wireDrawer();wireDrop();_drawerMode='all';renderDrawer();openDrawer();
 bootAuth();   // 登录门：有有效 token 自动进入，否则显示登录页
 </script>

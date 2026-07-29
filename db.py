@@ -94,6 +94,7 @@ def init_db():
             c.execute("ALTER TABLE fav_users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'user'")
             c.execute("ALTER TABLE fav_users ADD COLUMN IF NOT EXISTS pin_ver INTEGER DEFAULT 1")
             c.execute("ALTER TABLE fav_users ADD COLUMN IF NOT EXISTS disabled BOOLEAN DEFAULT false")
+            c.execute("ALTER TABLE fav_users ADD COLUMN IF NOT EXISTS credits INTEGER DEFAULT 0")  # 素材生成积分
             c.execute("""
                 CREATE TABLE IF NOT EXISTS favorites (
                     id         SERIAL PRIMARY KEY,
@@ -259,6 +260,82 @@ def delete_jobs(project_id: str = "", batch: str = "", owner: str = "") -> int:
         return 0
 
 
+# ── 素材生成：积分 ────────────────────────────────────────────────
+def user_credits(username: str) -> int:
+    """查用户剩余积分。"""
+    if not enabled():
+        return 0
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT COALESCE(credits,0) FROM fav_users WHERE username=%s",
+                          (username,)).fetchone()
+        return int(r[0]) if r else 0
+    except Exception as e:
+        print(f"[db] user_credits 失败: {e}")
+        return 0
+
+
+def user_add_credits(username: str, delta: int) -> int:
+    """充值/调整积分（delta 可负），返回调整后余额；用户不存在返回 -1。"""
+    if not enabled():
+        return -1
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "UPDATE fav_users SET credits=GREATEST(0, COALESCE(credits,0)+%s)"
+                " WHERE username=%s RETURNING credits", (int(delta), username)).fetchone()
+        return int(r[0]) if r else -1
+    except Exception as e:
+        print(f"[db] user_add_credits 失败: {e}")
+        return -1
+
+
+def user_try_deduct(username: str, amount: int) -> bool:
+    """原子扣减：余额足够才扣并返回 True，否则不动返回 False。"""
+    if not enabled():
+        return True   # 未接数据库时不拦截（本地/降级）
+    if amount <= 0:
+        return True
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "UPDATE fav_users SET credits=COALESCE(credits,0)-%s"
+                " WHERE username=%s AND COALESCE(credits,0)>=%s RETURNING credits",
+                (int(amount), username, int(amount))).fetchone()
+        return r is not None
+    except Exception as e:
+        print(f"[db] user_try_deduct 失败: {e}")
+        return False
+
+
+# ── 素材生成：任务查询 ────────────────────────────────────────────
+def gen_list(owner: str = "", limit: int = 60):
+    """列出生成任务（kind in gen_video/gen_image）。给了 owner 只看该用户，否则全体（团队可见）。"""
+    if not enabled():
+        return []
+    try:
+        with _conn() as c:
+            sql = ("SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec,"
+                   " created_at, detail, cost_usd, batch, owner"
+                   " FROM jobs WHERE kind IN ('gen_video','gen_image')")
+            args = []
+            if owner:
+                sql += " AND owner=%s"; args.append(owner)
+            sql += " ORDER BY id DESC LIMIT %s"; args.append(limit)
+            rows = c.execute(sql, tuple(args)).fetchall()
+        cols = ["id", "kind", "project_id", "ref", "status", "ok", "r2_prefix",
+                "duration_sec", "created_at", "detail", "cost_usd", "batch", "owner"]
+        out = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["created_at"] = str(d["created_at"])
+            out.append(d)
+        return out
+    except Exception as e:
+        print(f"[db] gen_list 失败: {e}")
+        return []
+
+
 # ── 用户与登录 ───────────────────────────────────────────────────
 def fav_user_ensure(username: str, pin: str = "", role: str = "user") -> bool:
     """确保用户存在（不存在则创建）。"""
@@ -335,10 +412,11 @@ def user_list():
     try:
         with _conn() as c:
             rows = c.execute(
-                "SELECT username, role, disabled, created_at FROM fav_users ORDER BY username"
+                "SELECT username, role, disabled, created_at, COALESCE(credits,0)"
+                " FROM fav_users ORDER BY username"
             ).fetchall()
         return [{"username": r[0], "role": r[1] or "user", "disabled": bool(r[2]),
-                 "created_at": str(r[3])} for r in rows]
+                 "created_at": str(r[3]), "credits": int(r[4])} for r in rows]
     except Exception as e:
         print(f"[db] user_list 失败: {e}")
         return []
