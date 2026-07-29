@@ -211,6 +211,19 @@
   .tk>summary .tw{margin-left:auto;font-size:11px;color:var(--muted);font-weight:600}
   .tk .adg{border-left:2px solid var(--line-2);margin:8px 0 8px 14px;padding-left:10px}
   .tk .adg>.ah{font-size:12px;color:var(--sell);font-weight:700;margin:6px 0}
+  /* 对象级 / 类型级 折叠 */
+  .obj{border:1px solid var(--line);border-radius:9px;margin:8px 8px 8px 12px;overflow:hidden}
+  .obj>summary{list-style:none;cursor:pointer;padding:8px 10px;font-weight:700;font-size:12px;color:var(--sell);background:#eef7f9;display:flex;align-items:center;gap:6px}
+  .obj>summary::-webkit-details-marker{display:none}
+  .lg{margin:6px 8px}
+  .lg>summary{list-style:none;cursor:pointer;padding:7px 9px;font-weight:700;font-size:12px;border-radius:8px;background:var(--panel-2);display:flex;align-items:center;gap:7px}
+  .lg>summary::-webkit-details-marker{display:none}
+  .lg>summary .lc{margin-left:auto;font-size:11px;color:var(--muted);font-weight:600}
+  .lgbody{padding:6px 2px 2px 6px}
+  .pt-text{font-size:12.5px;color:var(--ink);line-height:1.55;max-height:62px;overflow:hidden}
+  .pt-text.open{max-height:none}
+  .pt-more{color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;margin-top:3px;display:inline-block}
+  .pt-vid{width:100%;max-width:230px;border-radius:8px;margin:7px 0 3px;background:#0c1222;display:block}
   .dr-x{margin-left:auto;cursor:pointer;font-weight:700;color:var(--muted)}
   .sec{margin-bottom:16px}.sec>.h{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
   .box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel-2);font-size:13px;line-height:1.6}
@@ -653,7 +666,17 @@ async function loadPickItems(){const i=$('#pickProject').value;if(i==='')return;
   try{const r=await fetch('/gen/prompt_pick?project_id='+encodeURIComponent(p.project_id)+'&owner='+encodeURIComponent(p.owner||''),{headers:headers()});
     const d=await r.json();renderPickItems(d.items||[]);}catch(e){$('#pickBody').innerHTML='<div class="muted">加载失败。</div>';}
 }
-// 任务级树形：批次(任务) › 广告 › 提示词，逐级缩进代表归属
+// 任务级树形：任务 › [对象] › 提示词类型(视频级/共性/镜头级) › 具体 prompt，逐级折叠
+const FOLDER_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+function lvlGroup(title,cls,arr){
+  if(!arr||!arr.length)return null;
+  const d=document.createElement('details');d.className='lg';
+  const s=document.createElement('summary');s.innerHTML='<span class="lv '+cls+'">'+title+'</span><span class="lc">'+arr.length+' 条</span>';
+  d.appendChild(s);
+  const body=document.createElement('div');body.className='lgbody';
+  arr.forEach(it=>body.appendChild(pickItemNode(it)));
+  d.appendChild(body);return d;
+}
 function renderPickItems(items){const bd=$('#pickBody');
   if(!items.length){bd.innerHTML='<div class="muted">该分组没有可用的提示词产物。</div>';return;}
   const byBatch={};items.forEach(it=>{(byBatch[it.batch||'-']=byBatch[it.batch||'-']||[]).push(it);});
@@ -662,25 +685,39 @@ function renderPickItems(items){const bd=$('#pickBody');
     const arr=byBatch[b];
     const tk=document.createElement('details');tk.className='tk';tk.open=bi===0;
     const sm=document.createElement('summary');
-    sm.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>任务 '+esc(b)+'<span class="tw">'+arr.length+' 条提示词</span>';
+    sm.innerHTML=FOLDER_SVG+'任务 '+esc(b)+'<span class="tw">'+arr.length+' 条提示词</span>';
     tk.appendChild(sm);
-    // 按广告分组
-    const byAd={};arr.forEach(it=>{const k=(it.level==='common')?'__共性__':(it.ad||'-');(byAd[k]=byAd[k]||[]).push(it);});
-    Object.keys(byAd).forEach(ad=>{
-      const adg=document.createElement('div');adg.className='adg';
-      adg.innerHTML='<div class="ah">'+(ad==='__共性__'?'品类共性镜头':('广告：'+esc(ad)))+'</div>';
-      byAd[ad].forEach(it=>adg.appendChild(pickItemNode(it)));
-      tk.appendChild(adg);
-    });
+    const commons=arr.filter(x=>x.level==='common');
+    const adMap={};arr.filter(x=>x.level!=='common').forEach(x=>{(adMap[x.ad||'-']=adMap[x.ad||'-']||[]).push(x);});
+    const objs=Object.keys(adMap);
+    if(objs.length>1){          // 多个对象 → 加对象级
+      objs.forEach(ad=>{
+        const ob=document.createElement('details');ob.className='obj';
+        const os=document.createElement('summary');os.innerHTML='对象：'+esc(ad);ob.appendChild(os);
+        const vg=lvlGroup('视频级','lv-video',adMap[ad].filter(x=>x.level==='video'));if(vg)ob.appendChild(vg);
+        const sg=lvlGroup('镜头级','lv-shot',adMap[ad].filter(x=>x.level==='shot'));if(sg)ob.appendChild(sg);
+        tk.appendChild(ob);
+      });
+      const cg=lvlGroup('共性镜头','lv-common',commons);if(cg)tk.appendChild(cg);
+    }else{                      // 单对象 → 视频级 / 共性 / 镜头级
+      const ad=objs[0];const vids=ad?adMap[ad].filter(x=>x.level==='video'):[];const shots=ad?adMap[ad].filter(x=>x.level==='shot'):[];
+      [lvlGroup('视频级','lv-video',vids),lvlGroup('共性镜头','lv-common',commons),lvlGroup('镜头级','lv-shot',shots)]
+        .forEach(g=>{if(g)tk.appendChild(g);});
+    }
     bd.appendChild(tk);
   });
 }
-function pickItemNode(it){const lv={video:['视频级','lv-video'],shot:['镜头 '+(it.idx||''),'lv-shot'],common:['共性','lv-common']}[it.level]||['',''];
-  const el=document.createElement('div');el.className='pitem';const adline=it.ad?('<span class="muted" style="font-size:11px">'+esc(it.ad)+'</span>'):'';
+function pickItemNode(it){
+  const lv={video:['视频级','lv-video'],shot:['镜头 '+(it.idx||''),'lv-shot'],common:['共性','lv-common']}[it.level]||['',''];
+  const el=document.createElement('div');el.className='pitem';
+  const vid=it.video?('<video class="pt-vid" src="'+esc(it.video)+'" controls preload="metadata"></video>'):'';
   const sell=(it.卖点&&it.卖点.length)?('<div class="sell">卖点：'+it.卖点.map(esc).join('、')+'</div>'):'';
-  el.innerHTML='<div><span class="lv '+lv[1]+'">'+esc(lv[0])+'</span>'+adline+'</div><div class="t">'+esc(it.text)+'</div>'+sell+'<div class="act"><button class="soft" onclick="fillFromPick(this)">填入提示词</button></div>';
-  el.querySelector('button')._it=it;return el;
+  el.innerHTML='<div><span class="lv '+lv[1]+'">'+esc(lv[0])+'</span></div>'+vid+
+    '<div class="pt-text">'+esc(it.text)+'</div><span class="pt-more" onclick="tglMore(this)">展开 ▾</span>'+sell+
+    '<div class="act"><button class="soft" onclick="fillFromPick(this)">填入提示词</button></div>';
+  el.querySelector('button.soft')._it=it;return el;
 }
+function tglMore(a){const t=a.previousElementSibling;const open=t.classList.toggle('open');a.textContent=open?'收起 ▴':'展开 ▾';}
 function fillFromPick(btn){const it=btn._it;_pv=[];clearParent();
   const lvname={video:'视频级脚本',shot:'镜头 '+(it.idx||''),common:'共性镜头'}[it.level]||'';const src='分析：'+(it.batch||'')+(it.ad?(' · '+it.ad):'')+' · '+lvname;
   setPromptVersion(it.text,'source',src);$('#srcTxt').textContent='来源：'+src;$('#srcbar').classList.add('on');closePick();$('#prompt').focus();

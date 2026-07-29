@@ -1384,8 +1384,10 @@ def gen_series(series_id: str, user: dict = Depends(current_user)):
 
 
 # ── 联动：在生成模块里查看/使用分析模块产出的提示词 ──────────────
-def _extract_prompts(reports: dict, show_pfx: str) -> list:
-    """从 /result 的 reports 里抽取可直接"送去生成"的提示词条目（仅中文）。"""
+def _extract_prompts(reports: dict, show_pfx: str, media: dict = None) -> list:
+    """从 /result 的 reports 里抽取提示词条目（仅中文）。
+    media[(batch,ad)] = {"clips":[url...], "raw":url} 用于给视频级/镜头级配原视频片段。"""
+    media = media or {}
     items = []
     for k, v in reports.items():
         rel = k[len(show_pfx):] if k.startswith(show_pfx) else k
@@ -1394,19 +1396,24 @@ def _extract_prompts(reports: dict, show_pfx: str) -> list:
         if k.endswith("video_prompt.json") and len(parts) >= 3:
             t = v.get("video_prompt_text")
             if t:
+                mv = media.get((parts[0], parts[1]), {})
                 items.append({"level": "video", "batch": parts[0], "ad": parts[1],
-                              "idx": None, "卖点": [], "text": t})
+                              "idx": None, "卖点": [], "text": t,
+                              "video": mv.get("raw") or (mv.get("clips") or [""])[0]})
         elif k.endswith("shot_prompts.json") and len(parts) >= 3:
+            clips = media.get((parts[0], parts[1]), {}).get("clips", [])
             for i, it in enumerate(v.get("镜头级prompt列表") or []):
                 if it.get("prompt"):
                     items.append({"level": "shot", "batch": parts[0], "ad": parts[1],
                                   "idx": it.get("序号", i + 1), "卖点": it.get("卖点", []),
-                                  "text": it["prompt"]})
+                                  "text": it["prompt"],
+                                  "video": clips[i] if i < len(clips) else ""})
         elif k.endswith("共性镜头prompt.json") and len(parts) >= 2:
             for i, it in enumerate(v.get("共性镜头prompt列表") or []):
                 if it.get("prompt"):
                     items.append({"level": "common", "batch": parts[0], "ad": None,
-                                  "idx": i + 1, "卖点": it.get("卖点", []), "text": it["prompt"]})
+                                  "idx": i + 1, "卖点": it.get("卖点", []),
+                                  "text": it["prompt"], "video": ""})
     return items
 
 
@@ -1439,6 +1446,7 @@ def gen_prompt_pick(project_id: str, owner: str = "", user: dict = Depends(curre
         return {"project_id": project_id, "owner": owner, "items": []}
     WANT = ("video_prompt.json", "shot_prompts.json", "共性镜头prompt.json")
     reports = {}
+    media = {}   # (batch,ad) -> {"clips":[url...], "raw":url}
     for k in keys:
         if any(k.endswith(w) for w in WANT):
             show_k = show_pfx + k[len(real_pfx):]
@@ -1446,8 +1454,22 @@ def gen_prompt_pick(project_id: str, owner: str = "", user: dict = Depends(curre
                 reports[show_k] = r2.read_json(k)
             except Exception:
                 pass
+        elif k.endswith(".mp4"):
+            rel = k[len(real_pfx):]                     # {batch}/{ad}/shot_x.mp4
+            p = rel.split("/")
+            if len(p) >= 3:
+                media.setdefault((p[0], p[1]), {"clips": [], "raw": ""})["clips"].append(r2.public_url(k))
+    # 原视频（raw/{epid}/{batch}/{ad}.mp4）
+    for rk in r2.list_keys(f"raw/{epid}/"):
+        if rk.lower().endswith(".mp4"):
+            rel = rk[len(f"raw/{epid}/"):]              # {batch}/{ad}.mp4
+            p = rel.split("/")
+            if len(p) >= 2:
+                media.setdefault((p[0], p[-1][:-4]), {"clips": [], "raw": ""})["raw"] = r2.public_url(rk)
+    for mv in media.values():
+        mv["clips"].sort()
     return {"project_id": project_id, "owner": owner,
-            "items": _extract_prompts(reports, show_pfx)}
+            "items": _extract_prompts(reports, show_pfx, media)}
 
 
 class CreditReq(BaseModel):
