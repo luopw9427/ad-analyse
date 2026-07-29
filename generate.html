@@ -93,12 +93,14 @@
 
   /* 版本卡（Normal / Fast）*/
   .vercards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .vercard{border:1.5px solid var(--line-2);border-radius:11px;padding:11px 12px;cursor:pointer;transition:.15s;position:relative}
+  .vercard{display:flex;align-items:center;gap:11px;border:1.5px solid var(--line-2);border-radius:12px;
+    padding:13px 12px;cursor:pointer;transition:.15s;position:relative}
   .vercard:hover{border-color:var(--accent)}
   .vercard.on{border-color:var(--accent);background:var(--accent-weak)}
-  .vercard b{display:block;font-size:13px}
-  .vercard small{color:var(--muted);font-size:11px}
-  .vercard .rd{position:absolute;top:10px;right:10px;width:15px;height:15px;border-radius:50%;border:2px solid var(--line-2)}
+  .vercard .vi{width:32px;height:32px;border-radius:9px;flex:0 0 32px;display:flex;align-items:center;justify-content:center;
+    background:linear-gradient(135deg,#2f6bed,#8a5cf6);color:#fff}
+  .vercard b{font-size:13.5px;font-weight:700}
+  .vercard .rd{position:absolute;top:10px;right:10px;width:15px;height:15px;border-radius:50%;border:2px solid var(--line-2);background:#fff}
   .vercard.on .rd{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px #fff}
 
   /* 参数按钮组（图4 那种）*/
@@ -236,8 +238,8 @@
 
     <div class="lab">模型</div>
     <div class="modelbox">
-      <div class="mi"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 5.3L19 10l-5.1 1.7L12 17l-1.9-5.3L5 10l5.1-1.7z"/></svg></div>
-      <div class="mtxt"><select id="family" onchange="onFamilyChange()"></select><div class="md" id="familyDesc"></div></div>
+      <div class="mi"><svg width="21" height="21" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="2.4" height="6" rx="1.2"/><rect x="7.4" y="6" width="2.4" height="12" rx="1.2"/><rect x="11.8" y="3.5" width="2.4" height="17" rx="1.2"/><rect x="16.2" y="7" width="2.4" height="10" rx="1.2"/><rect x="20.6" y="10" width="2.4" height="4" rx="1.2" opacity=".7"/></svg></div>
+      <div class="mtxt"><select id="family" onchange="onFamilyChange()"></select></div>
     </div>
 
     <div id="verWrap"><div class="lab">模型版本</div><div class="vercards" id="vercards"></div></div>
@@ -387,19 +389,18 @@ function buildFamilies(){
   const map={};list.forEach(m=>{(map[m.family]=map[m.family]||{family:m.family,family_desc:m.family_desc,versions:[]}).versions.push(m);});
   _families=Object.values(map);
   const sel=$('#family');sel.innerHTML='';
-  if(!_families.length){sel.innerHTML='<option>（暂无可用模型）</option>';$('#familyDesc').textContent='';$('#vercards').innerHTML='';return;}
+  if(!_families.length){sel.innerHTML='<option>（暂无可用模型）</option>';$('#vercards').innerHTML='';return;}
   _families.forEach((f,i)=>{const o=document.createElement('option');o.value=i;o.textContent=f.family;sel.appendChild(o);});
   onFamilyChange();
 }
+const WAVE_ICON='<div class="vi"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="9" width="2.2" height="6" rx="1.1"/><rect x="7.2" y="6" width="2.2" height="12" rx="1.1"/><rect x="11.4" y="3.5" width="2.2" height="17" rx="1.1"/><rect x="15.6" y="7" width="2.2" height="10" rx="1.1"/><rect x="19.8" y="10" width="2.2" height="4" rx="1.1" opacity=".7"/></svg></div>';
 function onFamilyChange(){
   const f=_families[+$('#family').value]||_families[0];if(!f)return;
-  $('#familyDesc').textContent=f.family_desc||'';
   const wrap=$('#verWrap'),vc=$('#vercards');vc.innerHTML='';
-  // 单版本则隐藏版本卡
-  wrap.style.display=f.versions.length>1?'':'none';
+  wrap.style.display=f.versions.length>1?'':'none';   // 单版本则隐藏版本卡
   f.versions.forEach((m,i)=>{
     const c=document.createElement('div');c.className='vercard'+(i===0?' on':'');
-    c.innerHTML='<span class="rd"></span><b>'+esc(m.version||m.label)+'</b><small>'+esc(m.version_desc||'')+'</small>';
+    c.innerHTML='<span class="rd"></span>'+WAVE_ICON+'<b>'+esc(m.version||m.label)+'</b>';
     c.onclick=()=>{vc.querySelectorAll('.vercard').forEach(x=>x.classList.remove('on'));c.classList.add('on');selectModel(m.id);};
     vc.appendChild(c);
   });
