@@ -185,8 +185,13 @@
   <aside class="gen-panel">
     <div class="notice" id="notice"></div>
 
-    <div class="seg" id="typeSeg" style="margin-bottom:14px">
-      <button data-type="video" class="on" onclick="setType('video')">文生视频 / 图生视频</button>
+    <h3 style="margin-top:0">生成类型</h3>
+    <div class="field">
+      <select id="mode" style="width:100%" onchange="onModeChange()">
+        <option value="t2v">文生视频（文字 → 视频）</option>
+        <option value="i2v">图生视频（图片 → 视频）</option>
+        <option value="t2i">文生图（文字 → 图片）</option>
+      </select>
     </div>
 
     <h3>模型</h3>
@@ -205,8 +210,8 @@
     <div class="srcbar" id="srcbar"><span id="srcTxt"></span><span class="x" onclick="clearSrc()">✕</span></div>
     <textarea id="prompt" placeholder="描述你想生成的画面；也可点「用分析结果」把分析出的镜头脚本一键填入…" maxlength="2000"></textarea>
 
-    <div class="field" style="margin-top:12px">
-      <label>参考图 / 首帧 URL（可选，图生视频用）</label>
+    <div class="field" id="refField" style="margin-top:12px">
+      <label id="refLabel">参考图 / 首帧 URL（可选）</label>
       <input id="refimg" placeholder="https://…/xxx.jpg" style="width:100%">
     </div>
 
@@ -264,7 +269,7 @@
 <script>
 const $=s=>document.querySelector(s);
 let _token=null,_user='',_role='';
-let MODELS=[],_curType='video',_mine=1,_pollTimer=null,_pickProjects=[];
+let MODELS=[],_curType='video',_mode='t2v',_mine=1,_pollTimer=null,_pickProjects=[];
 
 function _loadToken(){try{return localStorage.getItem('authToken')||sessionStorage.getItem('authToken')||null}catch(e){return null}}
 const headers=()=>_token?{'Authorization':'Bearer '+_token}:{};
@@ -302,6 +307,16 @@ async function loadModels(){
   else{chip.className='chip warn';chip.textContent='Seedance 未配置';
     const n=$('#notice');n.style.display='block';
     n.textContent='⚠ 尚未配置 SEEDANCE_KEY，配置后即可生成。';}
+  onModeChange();
+}
+// 生成类型切换（文生视频 / 图生视频 / 文生图）
+function onModeChange(){
+  _mode=$('#mode').value;
+  _curType=(_mode==='t2i')?'image':'video';
+  const rf=$('#refField'),rl=$('#refLabel');
+  if(_mode==='i2v'){rf.style.display='';rl.textContent='参考图 / 首帧 URL（图生视频·必填）';}
+  else if(_mode==='t2v'){rf.style.display='';rl.textContent='参考图 / 首帧 URL（可选，填了即图生视频）';}
+  else{rf.style.display='none';}
   buildModelSelect();
 }
 function buildModelSelect(){
@@ -322,7 +337,7 @@ function onModelChange(){
   if(m.kind==='video'){
     if(m.durations.length)mk('时长(秒)','<select id="p_duration">'+opts(m.durations)+'</select>');
     if(m.resolutions.length)mk('分辨率','<select id="p_resolution">'+opts(m.resolutions,'720p')+'</select>');
-    if(m.aspects.length)mk('画幅','<select id="p_aspect">'+opts(m.aspects,'16:9')+'</select>');
+    if(m.aspects.length&&_mode!=='i2v')mk('画幅','<select id="p_aspect">'+opts(m.aspects,'16:9')+'</select>');  // 图生视频画幅由参考图决定
   }else{
     if(m.resolutions.length)mk('尺寸','<select id="p_resolution">'+opts(m.resolutions)+'</select>');
     mk('数量','<select id="p_num"><option>1</option><option>2</option><option>3</option><option>4</option></select>');
@@ -330,6 +345,7 @@ function onModelChange(){
   updEst();
   ['p_duration','p_resolution','p_num'].forEach(id=>{const el=$('#'+id);if(el)el.addEventListener('change',updEst)});
 }
+function setMode(mode){$('#mode').value=mode;onModeChange();}
 function gatherParams(){
   const p={};['duration','resolution','aspect','num'].forEach(k=>{const el=$('#p_'+k);if(el)p[k]=el.value});
   if(p.duration)p.duration=+p.duration;if(p.num)p.num=+p.num;return p;
@@ -354,13 +370,13 @@ function updEst(){
   const usd=estUsd(m,gatherParams());
   $('#estChip').innerHTML='预计消耗 <b>≈ $'+usd.toFixed(2)+'</b> · 约 '+Math.round(usd*100)+' Seedance 积分';
 }
-function setType(t){_curType=t;buildModelSelect();}
 
 // ── 生成 ──
 async function doGenerate(){
   const m=curModel();if(!m){alert('请选择模型');return;}
   if(!m.configured){alert('该模型未配置 API key，暂不能生成');return;}
   const prompt=$('#prompt').value.trim();const ref=$('#refimg').value.trim();
+  if(_mode==='i2v'&&!ref){alert('图生视频需要提供参考图 URL');return;}
   if(!prompt&&!ref){alert('请填写提示词或参考图');return;}
   $('#btnGen').disabled=true;$('#genHint').textContent='提交中…';
   try{
@@ -457,7 +473,7 @@ function pickItemNode(it){
   return el;
 }
 function fillFromPick(btn){
-  const it=btn._it;setType('video');
+  const it=btn._it;setMode('t2v');
   $('#prompt').value=it.text;
   const lvname={video:'视频级脚本',shot:'镜头 '+(it.idx||''),common:'共性镜头'}[it.level]||'';
   $('#srcTxt').textContent='来源：'+(it.batch||'')+(it.ad?(' · '+it.ad):'')+' · '+lvname;
@@ -473,7 +489,7 @@ function prefill(){
     const prompt=q.get('prompt')||(pf&&pf.prompt);
     const type=q.get('type')||(pf&&pf.type);
     const ref=q.get('ref')||(pf&&pf.ref);
-    if(type&&type!==_curType)setType(type);
+    if(type)setMode(type==='image'?'t2i':(ref?'i2v':'t2v'));
     if(prompt){$('#prompt').value=prompt;if(pf&&pf.src){$('#srcTxt').textContent='来源：'+pf.src;$('#srcbar').classList.add('on');}}
     if(ref)$('#refimg').value=ref;
   }catch(e){}
