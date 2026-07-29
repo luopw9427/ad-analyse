@@ -125,7 +125,7 @@ async function renderAudit(){
     +'<button class="'+(AUDT==='login'?'on':'')+'" onclick="setAudt(\'login\')">登录日志</button>'
     +'<button class="'+(AUDT==='op'?'on':'')+'" onclick="setAudt(\'op\')">操作日志</button>'
     +'<button class="mini" style="margin-left:6px" onclick="renderAudit()">刷新</button></div>';
-  const title=(AUDT==='login')?'登录日志（谁 / 何时 / 什么 IP / 成功或失败）':'操作日志（建号、改角色、删除等，含 IP）';
+  const title=(AUDT==='login')?'登录日志':'操作日志';
   box.innerHTML='<h3>'+title+'</h3>'+sub+'<div id="auditbody"><div class="muted">加载中…</div></div>';
   try{const d=await api('/admin/audit?limit=400');
     const rows=(d.audit||[]).filter(a=>AUDT==='login'?LOGIN_ACTS.includes(a.action):!LOGIN_ACTS.includes(a.action));

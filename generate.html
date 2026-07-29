@@ -160,6 +160,11 @@
   .iconbtn:hover{border-color:var(--accent);color:var(--accent)}
   .iconbtn:hover .lbl,.iconbtn.on .lbl{max-width:48px;opacity:1;margin-left:6px}
   .iconbtn.on{background:var(--accent-weak);border-color:var(--accent);color:var(--accent-ink)}
+  /* 个人/全体 滑动切换（同分析页 中/EN 样式）*/
+  .bi-tabs{display:inline-flex;gap:1px;background:var(--line-2);border-radius:7px;padding:2px;vertical-align:middle}
+  .bi-tabs button{border:0;background:transparent;color:var(--muted);font-size:12px;font-weight:600;padding:4px 12px;border-radius:6px;cursor:pointer;box-shadow:none;line-height:1.5}
+  .bi-tabs button:hover{background:transparent;color:var(--sub)}
+  .bi-tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.12)}
 
   .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px}
   .g-card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--sh-sm);cursor:pointer;transition:.15s}
@@ -262,7 +267,7 @@
 
     <div class="lab"><span>提示词</span>
       <span class="ptools">
-        <button class="soft" onclick="openPick()">📋 使用分析结果</button>
+        <button class="soft" onclick="openPick()">使用分析结果</button>
         <button class="soft" id="btnOpt" onclick="doOptimize()" title="AI 按广告素材标准优化提示词">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3l1.4 3.9L17 8l-3.6 1.1L12 13l-1.4-3.9L7 8l3.6-1.1z"/><path d="M19 14l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z"/></svg> AI优化提示词
         </button>
@@ -328,7 +333,7 @@
 <div id="pick" class="drawer">
   <div class="dr-hd">
     <b>使用分析结果</b>
-    <label class="muted" style="font-size:12px"><input type="checkbox" id="pickTeam" onchange="loadPickProjects()"> 看全体</label>
+    <div class="bi-tabs" id="pickScope"><button class="on" onclick="setPickScope(1)">个人</button><button onclick="setPickScope(0)">全体</button></div>
     <span class="dr-x" onclick="closePick()">✕</span>
     <select id="pickProject" style="flex:1 1 100%;margin-top:6px" onchange="loadPickItems()"><option value="">选择一个已分析的分组…</option></select>
   </div>
@@ -596,8 +601,12 @@ function clearParent(){_parentId=null;$('#parentbar').classList.remove('on');}
 // ── 使用分析结果 ──
 function openPick(){document.body.classList.add('pick-open');if(!_pickProjects.length)loadPickProjects();}
 function closePick(){document.body.classList.remove('pick-open');}
-async function loadPickProjects(){const mine=$('#pickTeam').checked?0:1;
-  try{const r=await fetch('/gen/prompt_projects?mine='+mine,{headers:headers()});const d=await r.json();_pickProjects=d.projects||[];
+let _pickMine=1;
+function setPickScope(mine){_pickMine=mine;
+  $('#pickScope').querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on',(i===0)===(mine===1)));
+  loadPickProjects();}
+async function loadPickProjects(){
+  try{const r=await fetch('/gen/prompt_projects?mine='+_pickMine,{headers:headers()});const d=await r.json();_pickProjects=d.projects||[];
     const sel=$('#pickProject');sel.innerHTML='<option value="">选择一个已分析的分组…</option>';
     _pickProjects.forEach((p,i)=>{const o=document.createElement('option');o.value=i;o.textContent=p.project_id+(p.owner?'（@'+p.owner+'）':'');sel.appendChild(o);});
     $('#pickBody').innerHTML='<div class="muted">'+(_pickProjects.length?'请选择一个分组。':'暂无已分析的分组。到「广告分析」跑完分析后再来。')+'</div>';
