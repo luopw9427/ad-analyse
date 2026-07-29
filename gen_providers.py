@@ -63,21 +63,21 @@ MODEL_CATALOG = {
     # ── 视频（Seedance，可调用）──
     "seedance-2.0": {
         "kind": "video", "provider": "seedance", "seedance_model": "seedance-2.0",
-        "label": "Seedance 2.0（高质量·推荐）",
+        "label": "Seedance 2.0",
         "durations": [5, 10, 15], "resolutions": ["480p", "720p", "1080p"],
         "aspects": ["16:9", "9:16", "4:3", "3:4"], "audio": False,
         "price_kind": "table", "table": {5: 2.40, 10: 4.80, 15: 7.20},
     },
     "seedance-2.0-fast": {
         "kind": "video", "provider": "seedance", "seedance_model": "seedance-2.0-fast",
-        "label": "Seedance 2.0 Fast（更快·更省）",
+        "label": "Seedance 2.0 Fast",
         "durations": [5, 10, 15], "resolutions": ["480p", "720p", "1080p"],
         "aspects": ["16:9", "9:16", "4:3", "3:4"], "audio": False,
         "price_kind": "table", "table": {5: 1.60, 10: 3.20, 15: 4.80},
     },
     "seedance-2-mini": {
         "kind": "video", "provider": "seedance", "seedance_model": "seedance-2-mini",
-        "label": "Seedance 2.0 Mini（灵活时长·最省）",
+        "label": "Seedance 2.0 Mini",
         "durations": [4, 5, 8, 10, 15], "resolutions": ["480p", "720p"],
         "aspects": ["16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "audio": False,
         "price_kind": "mini",

@@ -82,6 +82,10 @@ def init_db():
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cost_exact BOOLEAN DEFAULT true")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch TEXT")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner TEXT")   # 任务归属登录用户
+            # 素材生成：任务谱系（改词重生成形成版本链）
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS series_id TEXT")   # 同一谱系（一次创作的多版）
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS parent_id INTEGER") # 上一版任务 id
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ver INTEGER")       # 谱系内第几版
             # 收藏 + 收藏用户（为将来登录预留）
             c.execute("""
                 CREATE TABLE IF NOT EXISTS fav_users (
@@ -309,31 +313,99 @@ def user_try_deduct(username: str, amount: int) -> bool:
 
 
 # ── 素材生成：任务查询 ────────────────────────────────────────────
-def gen_list(owner: str = "", limit: int = 60):
-    """列出生成任务（kind in gen_video/gen_image）。给了 owner 只看该用户，否则全体（团队可见）。"""
+_GEN_COLS = ("id, kind, project_id, ref, status, ok, r2_prefix, duration_sec,"
+             " created_at, detail, cost_usd, batch, owner, series_id, parent_id, ver")
+_GEN_KEYS = ["id", "kind", "project_id", "ref", "status", "ok", "r2_prefix",
+             "duration_sec", "created_at", "detail", "cost_usd", "batch", "owner",
+             "series_id", "parent_id", "ver"]
+
+
+def _gen_row(r):
+    d = dict(zip(_GEN_KEYS, r))
+    d["created_at"] = str(d["created_at"])
+    return d
+
+
+def gen_list(owner: str = "", limit: int = 60, latest_only: bool = True):
+    """列出生成任务（kind in gen_video/gen_image）。给了 owner 只看该用户，否则全体。
+    latest_only=True 时每个谱系只返回最新一版（列表更清爽；详情里再展开历史版本）。"""
     if not enabled():
         return []
     try:
         with _conn() as c:
-            sql = ("SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec,"
-                   " created_at, detail, cost_usd, batch, owner"
-                   " FROM jobs WHERE kind IN ('gen_video','gen_image')")
+            sql = f"SELECT {_GEN_COLS} FROM jobs WHERE kind IN ('gen_video','gen_image')"
             args = []
             if owner:
                 sql += " AND owner=%s"; args.append(owner)
-            sql += " ORDER BY id DESC LIMIT %s"; args.append(limit)
+            sql += " ORDER BY id DESC LIMIT %s"; args.append(max(limit * 4, 200))
             rows = c.execute(sql, tuple(args)).fetchall()
-        cols = ["id", "kind", "project_id", "ref", "status", "ok", "r2_prefix",
-                "duration_sec", "created_at", "detail", "cost_usd", "batch", "owner"]
-        out = []
-        for r in rows:
-            d = dict(zip(cols, r))
-            d["created_at"] = str(d["created_at"])
-            out.append(d)
-        return out
+        out = [_gen_row(r) for r in rows]
+        if latest_only:
+            seen, filtered = set(), []
+            for d in out:   # 已按 id DESC，先见到的即该谱系最新版
+                sid = d.get("series_id") or f"job{d['id']}"
+                if sid in seen:
+                    continue
+                seen.add(sid)
+                filtered.append(d)
+            out = filtered
+        return out[:limit]
     except Exception as e:
         print(f"[db] gen_list 失败: {e}")
         return []
+
+
+def gen_series(series_id: str):
+    """列出同一谱系的所有版本（含改词重生成的历史），按版本升序。"""
+    if not enabled() or not series_id:
+        return []
+    try:
+        with _conn() as c:
+            rows = c.execute(
+                f"SELECT {_GEN_COLS} FROM jobs WHERE series_id=%s ORDER BY id ASC",
+                (series_id,)).fetchall()
+        return [_gen_row(r) for r in rows]
+    except Exception as e:
+        print(f"[db] gen_series 失败: {e}")
+        return []
+
+
+def gen_get(job_id: int):
+    if not enabled():
+        return None
+    try:
+        with _conn() as c:
+            r = c.execute(
+                f"SELECT {_GEN_COLS} FROM jobs WHERE id=%s AND kind IN ('gen_video','gen_image')",
+                (job_id,)).fetchone()
+        return _gen_row(r) if r else None
+    except Exception as e:
+        print(f"[db] gen_get 失败: {e}")
+        return None
+
+
+def gen_set_lineage(job_id, series_id: str, parent_id, ver: int):
+    """给刚创建的生成任务写入谱系信息。series_id 为空时用 job 自身 id 兜底。"""
+    if not enabled() or job_id is None:
+        return
+    try:
+        sid = series_id or f"s{job_id}"
+        with _conn() as c:
+            c.execute("UPDATE jobs SET series_id=%s, parent_id=%s, ver=%s WHERE id=%s",
+                      (sid, parent_id, int(ver or 1), job_id))
+    except Exception as e:
+        print(f"[db] gen_set_lineage 失败: {e}")
+
+
+def gen_series_count(series_id: str) -> int:
+    if not enabled() or not series_id:
+        return 0
+    try:
+        with _conn() as c:
+            r = c.execute("SELECT COUNT(*) FROM jobs WHERE series_id=%s", (series_id,)).fetchone()
+        return int(r[0]) if r else 0
+    except Exception:
+        return 0
 
 
 # ── 用户与登录 ───────────────────────────────────────────────────

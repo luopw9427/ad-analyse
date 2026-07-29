@@ -31,8 +31,13 @@
   .rail-item:hover{background:rgba(255,255,255,.08);color:#fff}
   .rail-item.active{background:linear-gradient(90deg,#2f6bed,#5a52d8);color:#fff}
   .rail-item svg{flex:0 0 20px}
-  .rail-item span{opacity:0;transition:opacity .15s}
-  body.rail-open .rail-item span{opacity:1}
+  .rail-item span,.rail-sub span{opacity:0;transition:opacity .15s}
+  body.rail-open .rail-item span,body.rail-open .rail-sub span{opacity:1}
+  .rail-subs{display:flex;flex-direction:column;gap:2px;margin:0 0 4px 0}
+  .rail-sub{display:flex;align-items:center;gap:11px;color:#8c98b3;text-decoration:none;
+    padding:8px 10px 8px 12px;border-radius:9px;white-space:nowrap;font-size:12.5px;font-weight:600}
+  .rail-sub:hover{background:rgba(255,255,255,.06);color:#e6ebf5}
+  .rail-sub svg{flex:0 0 17px}
   .rail-sp{flex:1 1 auto}
   .rail-brand{color:#5f6b85;font-size:11px;text-align:center;padding:6px 0;white-space:nowrap;opacity:0}
   body.rail-open .rail-brand{opacity:1}
@@ -256,6 +261,20 @@
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m10 9 5 3-5 3z"/></svg>
     <span>素材生成</span>
   </a>
+  <div class="rail-subs">
+    <a class="rail-sub" href="/studio#t2v" title="文生视频">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h9v14H4z"/><path d="M13 9l7-3v12l-7-3"/></svg>
+      <span>文生视频</span>
+    </a>
+    <a class="rail-sub" href="/studio#i2v" title="图生视频">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="12" height="12" rx="2"/><path d="m6 13 3-3 3 3"/><path d="M16 9l5-2v10l-5-2"/></svg>
+      <span>图生视频</span>
+    </a>
+    <a class="rail-sub" href="/studio#t2i" title="文生图">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m5 17 4-4 3 3 3-3 4 4"/></svg>
+      <span>文生图</span>
+    </a>
+  </div>
   <div class="rail-sp"></div>
   <div class="rail-brand">云熙汇智</div>
 </nav>
@@ -306,7 +325,7 @@
         <option value="cpu">CPU · 慢</option>
       </select>
       <label class="ck"><input type="checkbox" id="fast" title="不重编码，快但可能重复/不准"> 快速切分</label>
-      <label class="ck"><input type="checkbox" id="keepraw"> 保留原视频</label>
+      <label class="ck"><input type="checkbox" id="keepraw" checked> 保留原视频</label>
     </div>
     <div class="row">
       <b style="visibility:hidden">①</b>
@@ -767,6 +786,16 @@ async function doDelete(single,analysisOnly){
     loadJobs();loadAll();
   }catch(e){logOps('✗ 删除失败 '+e.message)}
 }
+async function delRaw(batch,ad){
+  if(!confirm('删除广告 '+ad+' 的原视频？切片与分析产物保留。不可恢复。'))return;
+  try{
+    const r=await fetch('/delete_raw',{method:'POST',headers:{...headers(),'Content-Type':'application/json'},
+      body:JSON.stringify({project_id:(_ctxProject||proj()),owner:(_ctxOwner||_user),batch:batch,ad_id:ad})});
+    const d=await r.json();
+    if(d.ok){if(_res.batches[batch]&&_res.batches[batch].raws)delete _res.batches[batch].raws[ad];showSingle(batch,ad);logOps('✓ 已删除原视频');}
+    else alert(d.detail||'删除失败');
+  }catch(e){alert('删除失败：'+e.message)}
+}
 async function doDeleteBatch(){
   remember();if(!tok()){alert('先填访问密码');return}
   const b=$('#delBatch').value.trim();if(!b){alert('先填批次 id');return}
@@ -883,6 +912,7 @@ function _mergeResult(data){
     else if(k.endsWith('source.json'))A.source=(v&&v.url)||'';
   }
   (data.objects||[]).forEach(o=>{if(o.key.endsWith('.mp4')){const info=parseKey(o.key,pid);if(info&&info.ad){const bo=B(info.batch);if(!bo.ads[info.ad])bo.ads[info.ad]={};(bo.vids[info.ad]=bo.vids[info.ad]||[]);if(!bo.vids[info.ad].includes(o.url))bo.vids[info.ad].push(o.url)}}});
+  (data.raws||[]).forEach(o=>{const bo=B(o.batch);(bo.raws=bo.raws||{})[o.ad]=o.url;});
   if(data.count)_res.count=Math.max(_res.count||0,data.count);
 }
 async function ensureResult(force){
@@ -1329,7 +1359,19 @@ function buildCommonBody(v,ctx){
 
 function renderAdDetail(batch,ad,d,videos){
   const frag=document.createDocumentFragment();const agg=d.agg||{},vp=d.vp||{},sp=d.sp||{};
-  if(d.source){const p=document.createElement('div');p.style.margin='4px 0';p.innerHTML='<b>原视频：</b><a href="'+d.source+'" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">'+d.source+'</a>';frag.appendChild(p)}
+  // 原视频查看（保存的原始视频，可播放/下载/删除）——放在详情开头
+  const rawUrl=(_res.batches[batch]&&_res.batches[batch].raws)?_res.batches[batch].raws[ad]:null;
+  if(rawUrl){
+    const det=document.createElement('details');det.open=true;det.style.margin='2px 0 8px';
+    const sm=document.createElement('summary');sm.innerHTML='<b>原视频</b> <span class="muted" style="font-weight:400">· 保存的原始广告视频</span>';det.appendChild(sm);
+    const w=document.createElement('div');w.style.marginTop='6px';
+    const v=document.createElement('video');v.src=rawUrl;v.controls=true;v.preload='metadata';v.style.cssText='width:100%;max-width:420px;border-radius:10px;background:#0c1222';w.appendChild(v);
+    const bar=document.createElement('div');bar.style.cssText='display:flex;gap:8px;margin-top:6px';
+    const dlb=document.createElement('button');dlb.className='mini';dlb.innerHTML=IC.dl+' 下载原视频';dlb.onclick=async()=>{await downloadClip(rawUrl,batch+'_'+ad+'_原视频.mp4');markDone(dlb);};
+    const delb=document.createElement('button');delb.className='mini';delb.textContent='删除原视频';delb.onclick=()=>delRaw(batch,ad);
+    bar.appendChild(dlb);bar.appendChild(delb);w.appendChild(bar);det.appendChild(w);frag.appendChild(det);
+  }
+  if(d.source){const p=document.createElement('div');p.style.margin='4px 0';p.innerHTML='<b>原视频链接：</b><a href="'+d.source+'" target="_blank" rel="noopener" style="color:var(--accent);word-break:break-all">'+d.source+'</a>';frag.appendChild(p)}
   if(!agg.广告主张&&!vp.video_prompt_text){const p=document.createElement('div');p.className='muted';p.style.marginTop='6px';p.textContent='（仅拆分，尚未分析——点「开始分析本分组」生成卖点/脚本）';frag.appendChild(p)}
   if(videos.length){
     const det=document.createElement('details');det.open=true;

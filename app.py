@@ -41,6 +41,7 @@ import r2_storage as r2
 import db
 import translator
 import reviser
+import optimizer
 import gen_providers as gen
 
 ROOT = Path(__file__).resolve().parent
@@ -608,6 +609,16 @@ def result(project_id: str, include_content: bool = True, batch: str = "", owner
 
     objects = [{"key": _show(k), "url": r2.public_url(k)} for k in keys]
 
+    # 原视频（raw/{epid}/{batch}/{ad}.mp4）：单独列出，供结果详情"原视频查看/删除"
+    raw_real = f"raw/{epid}/" + (f"{batch}/" if batch else "")
+    raws = []
+    for rk in r2.list_keys(raw_real):
+        rel = rk[len(f"raw/{epid}/"):]           # {batch}/{ad}.mp4
+        parts = rel.split("/")
+        if len(parts) >= 2 and rk.lower().endswith(".mp4"):
+            raws.append({"batch": parts[0], "ad": parts[-1][:-4],
+                         "key": f"raw/{project_id}/" + rel, "url": r2.public_url(rk)})
+
     WANT = ("ad_aggregate.json", "video_prompt.json", "shot_prompts.json", "共性镜头prompt.json", "source.json",
             "ad_aggregate.en.json", "video_prompt.en.json", "shot_prompts.en.json", "共性镜头prompt.en.json")
     reports = {}
@@ -624,6 +635,7 @@ def result(project_id: str, include_content: bool = True, batch: str = "", owner
         "owner": owner,
         "count": len(keys),
         "objects": objects,
+        "raws": raws,
         "reports": reports,
     }
 
@@ -688,6 +700,27 @@ def delete(req: DeleteReq, request: Request, user: dict = Depends(current_user))
 
     jobs_deleted = db.delete_jobs(req.project_id, req.batch or "", target_owner) if req.clear_jobs else 0
     return {"ok": True, "deleted": deleted, "scope": scope, "jobs_deleted": jobs_deleted}
+
+
+class RawDeleteReq(BaseModel):
+    project_id: str
+    batch: str
+    ad_id: str
+    owner: Optional[str] = None
+
+
+@app.post("/delete_raw")
+def delete_raw(req: RawDeleteReq, request: Request, user: dict = Depends(current_user)):
+    """只删某广告保存的原视频（保留切片与分析产物）。"""
+    is_admin = user["role"] == "admin"
+    target_owner = (req.owner or "").strip() or user["username"]
+    if not is_admin and target_owner != user["username"]:
+        raise HTTPException(status_code=403, detail="只能删除自己的分组")
+    pid = _epid(target_owner, req.project_id)
+    deleted = r2.delete_keys(r2.list_keys(f"raw/{pid}/{req.batch}/{req.ad_id}.mp4"))
+    db.audit(user["username"], _client_ip(request), "r2_delete",
+             f"原视频 归属={target_owner} 分组={req.project_id} 批次={req.batch} 广告={req.ad_id}")
+    return {"ok": True, "deleted": deleted}
 
 
 class JobDeleteReq(BaseModel):
@@ -1137,6 +1170,25 @@ class GenReq(BaseModel):
     params: Optional[dict] = None          # {duration,resolution,aspect,audio,num,...}
     ref_image_url: Optional[str] = None    # 参考图/首帧（图生视频/垫图）
     source: Optional[str] = None           # 来源标记（如"来自分析:批次#序号"）
+    prompt_versions: Optional[list] = None # 提示词版本链 [{v,kind,instruction,text,at}]
+    parent_id: Optional[int] = None        # 从某任务"改词重生成"→ 链到父任务
+
+
+class OptimizeReq(BaseModel):
+    text: str
+    instruction: Optional[str] = None
+    kind: Optional[str] = "video"          # video / image
+
+
+@app.post("/gen/optimize")
+def gen_optimize(req: OptimizeReq, user: dict = Depends(current_user)):
+    """AI 优化提示词：按广告素材生成标准改写。不落库，版本随生成任务一起保存。"""
+    try:
+        opt, cost, tin, tout = optimizer.optimize(
+            req.text or "", req.instruction or "", req.kind or "video")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"优化失败：{e}")
+    return {"ok": True, "optimized": opt, "cost_usd": cost}
 
 
 @app.get("/gen/models")
@@ -1158,8 +1210,9 @@ def gen_status(user: dict = Depends(current_user)):
 
 def _run_gen_bg(job_id, owner: str, project_id: str, batch: str,
                 gtype: str, model: str, prompt: str, params: dict,
-                ref_image_url: str, est_usd: float, credits_charged: int):
-    """后台执行生成：调 provider → 下载产物 → 转存 R2 → 写 meta → 结算任务。"""
+                ref_image_url: str, est_usd: float, credits_charged: int,
+                prompt_versions=None, series_id: str = "", parent_id=None, ver: int = 1):
+    """后台执行生成：调 provider → 下载产物 → 转存 R2 → 写 meta（含提示词版本链/谱系）→ 结算。"""
     import requests as _rq
     t0 = time.time()
     epid = _epid(owner, project_id)
@@ -1180,9 +1233,11 @@ def _run_gen_bg(job_id, owner: str, project_id: str, batch: str,
             items.append({"kind": okind, "key": key, "url": pub})
         meta = {
             "type": gtype, "model": model, "prompt": prompt, "params": params or {},
-            "ref_image_url": ref_image_url or "", "source": "", "owner": owner,
+            "ref_image_url": ref_image_url or "", "owner": owner,
             "project_id": project_id, "batch": batch, "items": items,
             "est_usd": est_usd, "credits": credits_charged,
+            "prompt_versions": prompt_versions or [],   # 提示词优化版本链（含每版优化要求与文本）
+            "series_id": series_id, "parent_id": parent_id, "ver": ver,
             "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         r2.upload_json(f"{prefix}meta.json", meta)
@@ -1235,14 +1290,29 @@ def gen_create(req: GenReq, user: dict = Depends(current_user)):
     batch = time.strftime("%Y%m%d-%H%M%S") + f"-{req.model}"
     kind = "gen_video" if req.type == "video" else "gen_image"
     ref = (req.prompt or "")[:60]
+
+    # 谱系：改词重生成 → 继承父任务谱系并 +1 版；否则开新谱系
+    series_id, parent_id, ver = "", None, 1
+    if req.parent_id:
+        pj = db.gen_get(int(req.parent_id))
+        if pj and (pj.get("owner") == owner or user["role"] == "admin"):
+            series_id = pj.get("series_id") or f"s{pj['id']}"
+            parent_id = int(req.parent_id)
+            ver = db.gen_series_count(series_id) + 1
+
     job_id = db.start_job(kind, project_id, ref, product=req.model, batch=batch, owner=owner)
+    if not series_id:
+        series_id = f"s{job_id}"      # 新谱系用首个任务 id 命名
+    db.gen_set_lineage(job_id, series_id, parent_id, ver)
+
     threading.Thread(target=_run_gen_bg,
                      args=(job_id, owner, project_id, batch, req.type, req.model,
                            req.prompt or "", params, req.ref_image_url or "",
-                           est_usd, credits_charged),
+                           est_usd, credits_charged, req.prompt_versions or [],
+                           series_id, parent_id, ver),
                      daemon=True).start()
     return {"ok": True, "started": True, "job_id": job_id, "batch": batch,
-            "est_usd": est_usd, "est_credits": need}
+            "series_id": series_id, "ver": ver, "est_usd": est_usd, "est_credits": need}
 
 
 @app.get("/gen/list")
@@ -1252,21 +1322,38 @@ def gen_list(mine: int = 1, user: dict = Depends(current_user)):
     return {"jobs": db.gen_list(owner, 60)}
 
 
+def _gen_detail(j: dict) -> dict:
+    """把一条生成任务 + 其 meta 组装成详情。"""
+    prefix = j.get("r2_prefix") or ""
+    meta = None
+    if prefix:
+        try:
+            meta = r2.read_json(f"{prefix}meta.json")
+        except Exception:
+            meta = None
+    return {
+        "id": j["id"], "status": j["status"], "ok": j["ok"], "detail": j.get("detail"),
+        "owner": j.get("owner"), "kind": j.get("kind"), "model": j.get("product"),
+        "batch": j.get("batch"), "series_id": j.get("series_id"),
+        "parent_id": j.get("parent_id"), "ver": j.get("ver"),
+        "created_at": j.get("created_at"), "meta": meta,
+    }
+
+
 @app.get("/gen/result")
 def gen_result(job_id: int, user: dict = Depends(current_user)):
-    """按任务读取生成产物 meta。"""
-    for j in db.gen_list("", 200):
-        if j["id"] == job_id:
-            prefix = j.get("r2_prefix") or ""
-            if not prefix:
-                return {"status": j["status"], "detail": j.get("detail"), "meta": None}
-            try:
-                meta = r2.read_json(f"{prefix}meta.json")
-            except Exception:
-                meta = None
-            return {"status": j["status"], "ok": j["ok"], "detail": j.get("detail"),
-                    "owner": j.get("owner"), "meta": meta}
-    raise HTTPException(status_code=404, detail="任务不存在")
+    """按任务读取生成详情（含提示词版本链、素材、谱系信息）。"""
+    j = db.gen_get(job_id)
+    if not j:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    return _gen_detail(j)
+
+
+@app.get("/gen/series")
+def gen_series(series_id: str, user: dict = Depends(current_user)):
+    """列出同一谱系的所有版本（改词重生成历史），每版含提示词与素材，供详情页翻看。"""
+    jobs = db.gen_series(series_id)
+    return {"series_id": series_id, "versions": [_gen_detail(j) for j in jobs]}
 
 
 # ── 联动：在生成模块里查看/使用分析模块产出的提示词 ──────────────
