@@ -574,6 +574,7 @@ async function doSplit(){
     logOps((job.ok?'✓':'✗')+' 批次拆分：'+(job.detail||''));
   }catch(e){logOps('✗ 拆分失败 '+e.message)}
   _urlList=[];renderUrlChips();$('#files').value='';onFilesPicked();setStatus('拆分完成，可点「开始分析本批次」');$('#btnSplit').disabled=false;loadJobs();
+  loadAll();   // 拆分完成自动加载结果，切片直接显示在右侧
 }
 
 async function doAnalyze(){
