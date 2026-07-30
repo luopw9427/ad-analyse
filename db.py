@@ -111,6 +111,8 @@ def init_db():
                     UNIQUE (owner, ref)
                 )
             """)
+            # 收藏可见性：private 仅本人 / public 团队可见（管理员可见全部）
+            c.execute("ALTER TABLE favorites ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'private'")
             # 审计日志（登录/管理/删除等安全事件）
             c.execute("""
                 CREATE TABLE IF NOT EXISTS audit_log (
@@ -707,18 +709,21 @@ def admin_count() -> int:
 
 
 # ── 收藏（团队共享可见；增删见 app 层权限）─────────────────────────
-def fav_add(owner: str, kind: str, ref: str, label: str = "", meta=None):
-    """新增/更新收藏，返回该行 id。"""
+def fav_add(owner: str, kind: str, ref: str, label: str = "", meta=None, visibility: str = "private"):
+    """新增/更新收藏，返回该行 id。visibility: private(仅本人) / public(团队可见)。"""
     if not enabled() or not owner or not ref:
         return None
+    vis = "public" if visibility == "public" else "private"
     try:
         with _conn() as c:
             cur = c.execute(
-                "INSERT INTO favorites (owner, kind, ref, label, meta)"
-                " VALUES (%s,%s,%s,%s,%s::jsonb)"
-                " ON CONFLICT (owner, ref) DO UPDATE SET label=EXCLUDED.label, meta=EXCLUDED.meta"
+                "INSERT INTO favorites (owner, kind, ref, label, meta, visibility)"
+                " VALUES (%s,%s,%s,%s,%s::jsonb,%s)"
+                " ON CONFLICT (owner, ref) DO UPDATE SET label=EXCLUDED.label,"
+                " meta=EXCLUDED.meta, visibility=EXCLUDED.visibility"
                 " RETURNING id",
-                (owner, kind, ref, (label or "")[:500], _json.dumps(meta or {}, ensure_ascii=False)),
+                (owner, kind, ref, (label or "")[:500],
+                 _json.dumps(meta or {}, ensure_ascii=False), vis),
             )
             return cur.fetchone()[0]
     except Exception as e:
@@ -742,20 +747,33 @@ def fav_remove_by_id(fav_id: int, requester: str = "", is_admin: bool = False) -
         return 0
 
 
-def fav_list_all():
-    """所有人的收藏（团队共享可见），带 owner。"""
+def fav_list_for(username: str, is_admin: bool = False):
+    """按可见性列出收藏：本人=全部自己的；他人=仅 public；管理员=全部。带 owner/visibility。"""
     if not enabled():
         return []
     try:
         with _conn() as c:
-            rows = c.execute(
-                "SELECT id, owner, kind, ref, label, meta, created_at FROM favorites ORDER BY id DESC"
-            ).fetchall()
+            if is_admin:
+                rows = c.execute(
+                    "SELECT id, owner, kind, ref, label, meta, created_at,"
+                    " COALESCE(visibility,'private') FROM favorites ORDER BY id DESC"
+                ).fetchall()
+            else:
+                rows = c.execute(
+                    "SELECT id, owner, kind, ref, label, meta, created_at,"
+                    " COALESCE(visibility,'private') FROM favorites"
+                    " WHERE owner=%s OR COALESCE(visibility,'private')='public'"
+                    " ORDER BY id DESC", (username,)
+                ).fetchall()
         return [{"id": r[0], "owner": r[1], "kind": r[2], "ref": r[3], "label": r[4],
-                 "meta": r[5] or {}, "created_at": str(r[6])} for r in rows]
+                 "meta": r[5] or {}, "created_at": str(r[6]), "visibility": r[7]} for r in rows]
     except Exception as e:
-        print(f"[db] fav_list_all 失败: {e}")
+        print(f"[db] fav_list_for 失败: {e}")
         return []
+
+
+def fav_list_all():   # 兼容旧调用
+    return fav_list_for("", is_admin=True)
 
 
 def recent(limit: int = 50):

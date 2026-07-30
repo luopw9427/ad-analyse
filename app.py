@@ -833,6 +833,7 @@ class FavAddReq(BaseModel):
     ref: str                        # 去重键
     label: Optional[str] = ""
     meta: Optional[dict] = None
+    visibility: Optional[str] = "private"   # private 仅本人 / public 团队可见
 
 
 class FavRemoveReq(BaseModel):
@@ -841,17 +842,20 @@ class FavRemoveReq(BaseModel):
 
 @app.get("/fav/list")
 def fav_list(user: dict = Depends(current_user)):
-    """返回所有人的收藏（团队共享可见），带 owner；me 标注当前用户。"""
+    """收藏列表：本人全部 + 他人公开；管理员可见全部。me 标注当前用户。"""
     return {"me": user["username"], "role": user["role"],
-            "favorites": db.fav_list_all(), "db_enabled": db.enabled()}
+            "favorites": db.fav_list_for(user["username"], user["role"] == "admin"),
+            "db_enabled": db.enabled()}
 
 
 @app.post("/fav/add")
 def fav_add(req: FavAddReq, user: dict = Depends(current_user)):
-    fid = db.fav_add(user["username"], req.kind, req.ref, req.label or "", req.meta or {})
+    fid = db.fav_add(user["username"], req.kind, req.ref, req.label or "",
+                     req.meta or {}, req.visibility or "private")
     if fid is None:
         raise HTTPException(status_code=500, detail="收藏失败（未接数据库？）")
-    return {"ok": True, "id": fid, "owner": user["username"], "ref": req.ref}
+    return {"ok": True, "id": fid, "owner": user["username"], "ref": req.ref,
+            "visibility": "public" if req.visibility == "public" else "private"}
 
 
 @app.post("/fav/remove")
