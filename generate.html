@@ -226,7 +226,9 @@
   .pt-vid{width:100%;max-width:230px;border-radius:8px;margin:7px 0 3px;background:#0c1222;display:block}
   .dr-x{margin-left:auto;cursor:pointer;font-weight:700;color:var(--muted)}
   .sec{margin-bottom:16px}.sec>.h{font-size:12px;color:var(--muted);font-weight:700;margin-bottom:6px}
-  .box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel-2);font-size:13px;line-height:1.6}
+  .box{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--panel-2);font-size:13px;line-height:1.6;white-space:pre-wrap}
+  .box.pc{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .pcmore{color:var(--accent);cursor:pointer;font-size:12px;font-weight:600;margin-top:6px;display:inline-block}
   .dvid{width:100%;border-radius:10px;background:#0c1222;aspect-ratio:16/9}
   .pgroup{margin-bottom:14px}.pgroup>.h{font-size:12px;color:var(--muted);font-weight:700;margin:6px 0}
   .pitem{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:9px;background:var(--panel-2)}
@@ -276,7 +278,6 @@
       <div class="usermenu-pop">
         <div class="um-head"><b id="um-name"></b> <span id="um-role" class="muted"></span></div>
         <button class="um-item" onclick="location.href='/account'">个人中心</button>
-        <button class="um-item" onclick="location.href='/account'">账号设置</button>
         <button class="um-item" id="um-admin" style="display:none" onclick="location.href='/admin'">后台管理</button>
       </div>
     </div>
@@ -598,7 +599,7 @@ function galleryCard(j){
   c.innerHTML='<div class="g-media" id="m'+j.id+'">'+(j.status==='running'?'⏳ 生成中…':(j.ok?'':'✗ '+esc(j.detail||'失败')))+'</div>'+
     '<div class="g-body"><div class="p">'+esc(j.ref||'')+'</div>'+
     '<div class="g-tags"><span class="tag">'+typeName(j.kind)+'</span><span class="tag">'+esc(j.product||'')+'</span>'+vtag+'</div>'+
-    '<div class="g-meta"><span>编号 '+esc(j.series_id||'')+'</span>'+owner+'<span class="badge '+bcls+'">'+btxt+'</span></div></div>';
+    '<div class="g-meta"><span>编号 '+esc(j.series_no||j.series_id||'')+'</span>'+owner+'<span class="badge '+bcls+'">'+btxt+'</span></div></div>';
   if(j.status==='done'&&j.ok)loadThumb(j.id);
   return c;
 }
@@ -610,7 +611,7 @@ async function loadThumb(id){try{const d=await (await fetch('/gen/result?job_id=
 async function openDetail(id){
   document.body.classList.add('detail-open');const bd=$('#detailBody');bd.innerHTML='<div class="muted">加载中…</div>';
   try{const d=await (await fetch('/gen/result?job_id='+id,{headers:headers()})).json();const meta=d.meta||{};
-    $('#dtTitle').textContent='编号 '+(d.series_id||'')+' · v'+(d.ver||1);
+    $('#dtTitle').textContent='编号 '+(d.series_no||d.series_id||'')+' · v'+(d.ver||1);
     const it=(meta.items||[])[0];
     const media=it?((it.kind==='video')?('<video class="dvid" src="'+it.url+'" controls></video>'):('<img src="'+it.url+'" style="width:100%;border-radius:10px">')):'<div class="box muted">'+(d.status==='running'?'生成中…':'（暂无素材）')+'</div>';
     const pv=meta.prompt_versions||[];
@@ -619,7 +620,7 @@ async function openDetail(id){
     bd.innerHTML=
       '<div class="sec"><div class="h">生成类型</div><div class="box">'+MODE_NAME[meta.type==='image'?'image':'video']+' · '+esc(meta.model||d.model||'')+'</div></div>'+
       '<div class="sec"><div class="h">生成素材</div>'+media+'</div>'+
-      '<div class="sec"><div class="h">最终提示词</div><div class="box">'+esc(meta.prompt||d.detail||'')+'</div></div>'+
+      '<div class="sec"><div class="h">最终提示词</div><div class="box pc">'+esc(meta.prompt||d.detail||'')+'</div><span class="pcmore" onclick="tglBox(this)">展开 ▾</span></div>'+
       '<div class="sec"><div class="h">提示词版本（优化历史）</div><div class="box" style="padding:6px 10px">'+pvHtml+'</div></div>'+
       '<div class="sec"><div class="h">版本谱系（改词重生成历史）</div><div id="seriesBox" class="muted" style="font-size:12px">加载中…</div></div>'+
       '<button class="primary" style="margin-top:6px" onclick="regen('+id+')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v5h-5"/></svg><span>改提示词并重新生成</span></button>';
@@ -641,7 +642,7 @@ async function regen(id){
     $('#prompt').value=meta.prompt||'';updCC();_pv.push({v:1,kind:'manual',instruction:'',text:meta.prompt||'',at:new Date().toISOString()});renderVerbar();
     _refs=((meta.ref_image_urls&&meta.ref_image_urls.length)?meta.ref_image_urls:(meta.ref_image_url?[meta.ref_image_url]:[])).map(u=>({url:u}));renderRefs();
     if(meta.project_id)$('#project').value=meta.project_id;
-    $('#parentTxt').textContent='改词重生成自：编号 '+(d.series_id||'')+' · v'+(d.ver||1);$('#parentbar').classList.add('on');
+    $('#parentTxt').textContent='改词重生成自：编号 '+(d.series_no||d.series_id||'')+' · v'+(d.ver||1);$('#parentbar').classList.add('on');
     closeDetail();$('#prompt').focus();
   }catch(e){alert('载入失败：'+e);}
 }
@@ -718,6 +719,7 @@ function pickItemNode(it){
   el.querySelector('button.soft')._it=it;return el;
 }
 function tglMore(a){const t=a.previousElementSibling;const open=t.classList.toggle('open');a.textContent=open?'收起 ▴':'展开 ▾';}
+function tglBox(a){const b=a.previousElementSibling;const c=b.classList.toggle('pc');a.textContent=c?'展开 ▾':'收起 ▴';}
 function fillFromPick(btn){const it=btn._it;_pv=[];clearParent();
   const lvname={video:'视频级脚本',shot:'镜头 '+(it.idx||''),common:'共性镜头'}[it.level]||'';const src='分析：'+(it.batch||'')+(it.ad?(' · '+it.ad):'')+' · '+lvname;
   setPromptVersion(it.text,'source',src);$('#srcTxt').textContent='来源：'+src;$('#srcbar').classList.add('on');closePick();$('#prompt').focus();

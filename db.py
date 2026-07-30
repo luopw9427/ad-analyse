@@ -83,9 +83,10 @@ def init_db():
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS batch TEXT")
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS owner TEXT")   # 任务归属登录用户
             # 素材生成：任务谱系（改词重生成形成版本链）
-            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS series_id TEXT")   # 同一谱系（一次创作的多版）
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS series_id TEXT")   # 同一谱系唯一键（内部分组用）
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS parent_id INTEGER") # 上一版任务 id
             c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS ver INTEGER")       # 谱系内第几版
+            c.execute("ALTER TABLE jobs ADD COLUMN IF NOT EXISTS series_no TEXT")    # 友好编号 日期-分组-序号
             # 收藏 + 收藏用户（为将来登录预留）
             c.execute("""
                 CREATE TABLE IF NOT EXISTS fav_users (
@@ -316,10 +317,10 @@ def user_try_deduct(username: str, amount: int) -> bool:
 
 # ── 素材生成：任务查询 ────────────────────────────────────────────
 _GEN_COLS = ("id, kind, project_id, ref, status, ok, r2_prefix, duration_sec,"
-             " created_at, detail, cost_usd, batch, owner, series_id, parent_id, ver")
+             " created_at, detail, cost_usd, batch, owner, series_id, parent_id, ver, series_no")
 _GEN_KEYS = ["id", "kind", "project_id", "ref", "status", "ok", "r2_prefix",
              "duration_sec", "created_at", "detail", "cost_usd", "batch", "owner",
-             "series_id", "parent_id", "ver"]
+             "series_id", "parent_id", "ver", "series_no"]
 
 
 def _gen_row(r):
@@ -386,17 +387,35 @@ def gen_get(job_id: int):
         return None
 
 
-def gen_set_lineage(job_id, series_id: str, parent_id, ver: int):
-    """给刚创建的生成任务写入谱系信息。series_id 为空时用 job 自身 id 兜底。"""
+def gen_set_lineage(job_id, series_id: str, parent_id, ver: int, series_no: str = ""):
+    """给刚创建的生成任务写入谱系信息。series_id 为空时用 job 自身 id 兜底。
+    series_no 为友好编号（日期-分组-序号），空则回退用 series_id。"""
     if not enabled() or job_id is None:
         return
     try:
         sid = series_id or f"s{job_id}"
         with _conn() as c:
-            c.execute("UPDATE jobs SET series_id=%s, parent_id=%s, ver=%s WHERE id=%s",
-                      (sid, parent_id, int(ver or 1), job_id))
+            c.execute("UPDATE jobs SET series_id=%s, parent_id=%s, ver=%s, series_no=%s WHERE id=%s",
+                      (sid, parent_id, int(ver or 1), (series_no or sid), job_id))
     except Exception as e:
         print(f"[db] gen_set_lineage 失败: {e}")
+
+
+def gen_next_seq(owner: str, prefix: str) -> int:
+    """某 owner 下、series_no 以 prefix 开头(如 20260730-生成-)的谱系数量 +1，用作友好序号。"""
+    if not enabled():
+        return 1
+    try:
+        with _conn() as c:
+            r = c.execute(
+                "SELECT COUNT(DISTINCT series_id) FROM jobs"
+                " WHERE owner=%s AND series_no LIKE %s"
+                " AND kind IN ('gen_video','gen_image')",
+                (owner, prefix + "%")).fetchone()
+        return (int(r[0]) if r else 0) + 1
+    except Exception as e:
+        print(f"[db] gen_next_seq 失败: {e}")
+        return 1
 
 
 def gen_series_count(series_id: str) -> int:
@@ -774,6 +793,37 @@ def fav_list_for(username: str, is_admin: bool = False):
 
 def fav_list_all():   # 兼容旧调用
     return fav_list_for("", is_admin=True)
+
+
+def recent_for(owner: str = "", exclude_gen: bool = True, limit: int = 50):
+    """任务记录：给了 owner 只返回该用户的；exclude_gen 时排除素材生成任务。"""
+    if not enabled():
+        return []
+    try:
+        conds, args = [], []
+        if exclude_gen:
+            conds.append("kind NOT IN ('gen_video','gen_image')")
+        if owner:
+            conds.append("owner=%s"); args.append(owner)
+        where = (" WHERE " + " AND ".join(conds)) if conds else ""
+        args.append(limit)
+        with _conn() as c:
+            rows = c.execute(
+                "SELECT id, kind, project_id, ref, status, ok, r2_prefix, duration_sec, created_at, detail, engine, product, cost_usd, tokens_in, tokens_out, cost_exact, batch, owner"
+                " FROM jobs" + where + " ORDER BY id DESC LIMIT %s", tuple(args)
+            ).fetchall()
+        cols = ["id", "kind", "project_id", "ref", "status", "ok",
+                "r2_prefix", "duration_sec", "created_at", "detail", "engine", "product",
+                "cost_usd", "tokens_in", "tokens_out", "cost_exact", "batch", "owner"]
+        out = []
+        for r in rows:
+            d = dict(zip(cols, r))
+            d["created_at"] = str(d["created_at"])
+            out.append(d)
+        return out
+    except Exception as e:
+        print(f"[db] recent_for 失败: {e}")
+        return []
 
 
 def recent(limit: int = 50):

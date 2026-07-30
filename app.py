@@ -642,7 +642,9 @@ def result(project_id: str, include_content: bool = True, batch: str = "", owner
 
 @app.get("/jobs")
 def jobs(limit: int = 50, user: dict = Depends(current_user)):
-    return {"jobs": db.recent(limit), "db_enabled": db.enabled()}
+    # 任务记录只显示本人的拆分/分析任务，排除素材生成任务（生成有自己的结果页）
+    return {"jobs": db.recent_for(user["username"], exclude_gen=True, limit=limit),
+            "db_enabled": db.enabled()}
 
 
 class DeleteReq(BaseModel):
@@ -1294,11 +1296,10 @@ def gen_create(req: GenReq, user: dict = Depends(current_user)):
 
     owner = user["username"]
     project_id = (req.project_id or "生成").strip() or "生成"
-    batch = time.strftime("%Y%m%d-%H%M%S") + f"-{req.model}"
     kind = "gen_video" if req.type == "video" else "gen_image"
     ref = (req.prompt or "")[:60]
 
-    # 谱系：改词重生成 → 继承父任务谱系并 +1 版；否则开新谱系
+    # 编号：谱系 = {日期}-{分组}-{序号}；改词重生成继承谱系、版本+1；否则开新谱系取当日下一序号
     series_id, parent_id, ver = "", None, 1
     if req.parent_id:
         pj = db.gen_get(int(req.parent_id))
@@ -1306,10 +1307,13 @@ def gen_create(req: GenReq, user: dict = Depends(current_user)):
             series_id = pj.get("series_id") or f"s{pj['id']}"
             parent_id = int(req.parent_id)
             ver = db.gen_series_count(series_id) + 1
+    if not series_id:
+        d = time.strftime("%Y%m%d")
+        seq = db.gen_next_seq(owner, f"{d}-{project_id}-")
+        series_id = f"{d}-{project_id}-{seq:03d}"
+    batch = f"{series_id}-v{ver}"          # R2 归档路径，人类可读且唯一
 
     job_id = db.start_job(kind, project_id, ref, product=req.model, batch=batch, owner=owner)
-    if not series_id:
-        series_id = f"s{job_id}"      # 新谱系用首个任务 id 命名
     db.gen_set_lineage(job_id, series_id, parent_id, ver)
 
     threading.Thread(target=_run_gen_bg,
@@ -1366,6 +1370,7 @@ def _gen_detail(j: dict) -> dict:
         "id": j["id"], "status": j["status"], "ok": j["ok"], "detail": j.get("detail"),
         "owner": j.get("owner"), "kind": j.get("kind"), "model": j.get("product"),
         "batch": j.get("batch"), "series_id": j.get("series_id"),
+        "series_no": j.get("series_no") or j.get("series_id"),
         "parent_id": j.get("parent_id"), "ver": j.get("ver"),
         "created_at": j.get("created_at"), "meta": meta,
     }
